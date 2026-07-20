@@ -19,3 +19,6 @@ I am building this project to explore how software can help people make better e
 
 July 19, 2026:
 Created the PrintWise project.
+
+July 20, 2026:
+Added an STL Viewer with a grid view.
