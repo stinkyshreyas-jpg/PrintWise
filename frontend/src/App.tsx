@@ -10,7 +10,10 @@ interface AnalysisData {
   y: number;
   z: number;
   triangles: number;
+  volume: number; // <-- Add this
+  weight: number; // <-- Add this
 }
+
 
 function CameraResetController({ resetTrigger }: { resetTrigger: number }) {
   const lastTrigger = useRef(resetTrigger);
@@ -82,6 +85,18 @@ export default function App() {
     }
     return `${value.toFixed(1)} mm`;
   };
+  const formatVolume = (value: number) => {
+  if (useInches) {
+    return `${(value * 0.000061023843).toFixed(4)} in³`;
+  }
+  return `${value.toFixed(1)} mm³`;
+};
+
+const formatWeight = (value: number) => {
+  return `${value.toFixed(2)} g`;
+};
+
+
 
   const customAxesHelper = useMemo(() => {
     const group = new THREE.Group();
@@ -251,6 +266,16 @@ export default function App() {
                   {analysis.triangles.toLocaleString()}
                 </span>
               </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+  <span style={{ color: "#aaa" }}>Volume:</span>
+  <span style={{ fontWeight: "bold", color: "#00e5ff" }}>{formatVolume(analysis.volume)}</span>
+</div>
+
+<div style={{ display: "flex", justifyContent: "space-between" }}>
+  <span style={{ color: "#aaa" }}>PLA Weight:</span>
+  <span style={{ fontWeight: "bold", color: "#e91e63" }}>{formatWeight(analysis.weight)}</span>
+</div>
+
             </div>
           ) : (
             <div style={{ fontSize: "12px", color: "#666", textAlign: "center", padding: "6px 0" }}>

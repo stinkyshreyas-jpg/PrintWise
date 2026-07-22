@@ -14,7 +14,7 @@ interface ModelProps {
   model: LoadedModel;
   wireframe: boolean;
   fallbackColor: string;
-  onModelAnalyzed: (data: { x: number; y: number; z: number; triangles: number }) => void;
+  onModelAnalyzed: (data: { x: number; y: number; z: number; triangles: number; volume: number; weight: number }) => void;
 }
 
 function fixTextureColorSpace(object: THREE.Object3D) {
@@ -206,24 +206,50 @@ export default function Model({ model, wireframe, fallbackColor, onModelAnalyzed
           targetGroup.position.z = ((size.z * modelScale) / 2) + gridGapOffset;
 
           let totalTriangles = 0;
+          let totalVolume = 0;
+
+          const pA = new THREE.Vector3();
+          const pB = new THREE.Vector3();
+          const pC = new THREE.Vector3();
+
           targetGroup.traverse((child: any) => {
             if (child.isMesh && child.geometry) {
               const geom = child.geometry;
-              if (geom.index) {
-                totalTriangles += geom.index.count / 3;
-              } else if (geom.attributes.position) {
-                totalTriangles += geom.attributes.position.count / 3;
+              const position = geom.attributes.position;
+              const index = geom.index;
+
+              if (index) {
+                totalTriangles += index.count / 3;
+                for (let i = 0; i < index.count; i += 3) {
+                  pA.fromBufferAttribute(position, index.getX(i));
+                  pB.fromBufferAttribute(position, index.getX(i + 1));
+                  pC.fromBufferAttribute(position, index.getX(i + 2));
+                  totalVolume += pA.dot(pB.cross(pC)) / 6;
+                }
+              } else if (position) {
+                totalTriangles += position.count / 3;
+                for (let i = 0; i < position.count; i += 3) {
+                  pA.fromBufferAttribute(position, i);
+                  pB.fromBufferAttribute(position, i + 1);
+                  pC.fromBufferAttribute(position, i + 2);
+                  totalVolume += pA.dot(pB.cross(pC)) / 6;
+                }
               }
             }
           });
 
           const originalScaleFactor = isStlOrObj ? 20 : 1;
+          const finalVolumeMm3 = Math.abs(totalVolume);
+          const finalVolumeCm3 = finalVolumeMm3 / 1000;
+          const plaWeightGrams = finalVolumeCm3 * 1.24;
 
           onModelAnalyzed({
             x: size.x * originalScaleFactor,
             y: size.y * originalScaleFactor,
             z: size.z * originalScaleFactor,
-            triangles: Math.round(totalTriangles)
+            triangles: Math.round(totalTriangles),
+            volume: finalVolumeMm3,
+            weight: plaWeightGrams
           });
         }
       }}
