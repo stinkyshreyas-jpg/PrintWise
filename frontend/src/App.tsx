@@ -1,30 +1,50 @@
-import { Suspense, useState, useRef, type ChangeEvent } from "react";
-import { Canvas, useThree } from "@react-three/fiber";
+import { Suspense, useState, useRef, useMemo, type ChangeEvent } from "react";
+import * as THREE from "three";
+import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import Model from "./Model";
 import type { LoadedModel } from "./types";
 
-/**
- * Camera controller helper component.
- * Exposes a function to animate the camera smoothly back to a top-down corner perspective.
- */
-function CameraResetController({ resetTrigger }: { resetTrigger: number }) {
-  const { camera, controls } = useThree();
-  const lastTrigger = useRef(resetTrigger);
+interface AnalysisData {
+  x: number;
+  y: number;
+  z: number;
+  triangles: number;
+}
 
-  // When the parent counter changes, smoothly transition camera positions
+function CameraResetController({ resetTrigger }: { resetTrigger: number }) {
+  const lastTrigger = useRef(resetTrigger);
+  const isAnimating = useRef(false);
+
+  const targetCamPos = useMemo(() => new THREE.Vector3(12, -12, 12), []);
+  const targetLookAt = useMemo(() => new THREE.Vector3(0, 0, 0), []);
+
   if (resetTrigger !== lastTrigger.current) {
     lastTrigger.current = resetTrigger;
-    
-    // Animate camera position to a clean isometric corner angle [X, Y, Z]
-    camera.position.set(8, 8, 8);
-    camera.lookAt(0, 0, 0);
-
-    // Snap target rotation vectors back to dead center coordinate origin
-    if (controls) {
-      (controls as any).target.set(0, 0, 0);
-    }
+    isAnimating.current = true;
   }
+
+  useFrame((state) => {
+    if (!isAnimating.current) return;
+
+    const cam = state.camera;
+    const controls = state.controls as any;
+
+    cam.position.lerp(targetCamPos, 0.1);
+
+    if (controls) {
+      controls.target.lerp(targetLookAt, 0.1);
+      controls.update();
+    } else {
+      cam.lookAt(targetLookAt);
+    }
+
+    if (cam.position.distanceTo(targetCamPos) < 0.01) {
+      cam.position.copy(targetCamPos);
+      if (controls) controls.target.copy(targetLookAt);
+      isAnimating.current = false;
+    }
+  });
 
   return null;
 }
@@ -34,10 +54,14 @@ export default function App() {
   const [wireframe, setWireframe] = useState<boolean>(false);
   const [fallbackColor] = useState<string>("#cccccc");
   const [resetCounter, setResetCounter] = useState<number>(0);
+  const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
+  const [useInches, setUseInches] = useState<boolean>(false);
 
   const handleFileUpload = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    setAnalysis(null);
 
     const extension = file.name.split(".").pop()?.toLowerCase() || "";
     const blobUrl = URL.createObjectURL(file);
@@ -52,17 +76,57 @@ export default function App() {
     setResetCounter((prev) => prev + 1);
   };
 
+  const formatDim = (value: number) => {
+    if (useInches) {
+      return `${(value * 0.0393701).toFixed(3)} in`;
+    }
+    return `${value.toFixed(1)} mm`;
+  };
+
+  const customAxesHelper = useMemo(() => {
+    const group = new THREE.Group();
+
+    const xPoints = [new THREE.Vector3(-15, 0, 0), new THREE.Vector3(15, 0, 0)];
+    const xGeom = new THREE.BufferGeometry().setFromPoints(xPoints);
+    const redMat = new THREE.LineBasicMaterial({ color: 0xFF4554, linewidth: 2 });
+    const xAxis = new THREE.Line(xGeom, redMat);
+
+    const yPoints = [new THREE.Vector3(0, -15, 0), new THREE.Vector3(0, 15, 0)];
+    const yGeom = new THREE.BufferGeometry().setFromPoints(yPoints);
+    const greenMat = new THREE.LineBasicMaterial({ color: 0x80C627, linewidth: 2 });
+    const yAxis = new THREE.Line(yGeom, greenMat);
+
+    const zPoints = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 15)];
+    const zGeom = new THREE.BufferGeometry().setFromPoints(zPoints);
+    const blueMat = new THREE.LineBasicMaterial({ color: 0x3B80E6, linewidth: 2 });
+    const zAxis = new THREE.Line(zGeom, blueMat);
+
+    group.add(xAxis, yAxis, zAxis);
+    return group;
+  }, []);
+
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#111111", position: "relative" }}>
       
-      {/* 3D Scene Viewport */}
-      <Canvas shadows camera={{ fov: 45 }}>
+      <Canvas 
+        shadows 
+        camera={{ position: [12, -12, 12], fov: 45 }}
+        onCreated={({ camera }) => {
+          camera.up.set(0, 0, 1);
+          camera.lookAt(0, 0, 0);
+        }}
+      >
         <ambientLight intensity={0.8} />
-        <directionalLight position={[5, 10, 5]} intensity={1.5} castShadow />
-        <pointLight position={[-5, 5, -5]} intensity={0.5} />
-
-        {/* 3D Floor Measurement Grid (Size: 30 units, Divisions: 30 squares) */}
-        <gridHelper args={[30, 30, "#4caf50", "#333333"]} position={[0, -0.01, 0]} />
+        <directionalLight position={[10, -10, 15]} intensity={1.5} castShadow />
+        <pointLight position={[-5, 5, 5]} intensity={0.5} />
+        
+        <gridHelper 
+          args={[30, 30, "#333333", "#333333"]} 
+          position={[0, 0, -0.01]} 
+          rotation={[Math.PI / 2, 0, 0]}
+        />
+        
+        <primitive object={customAxesHelper} position={[0, 0, 0.005]} />
 
         <Suspense fallback={null}>
           {currentModel && (
@@ -70,6 +134,7 @@ export default function App() {
               model={currentModel} 
               wireframe={wireframe} 
               fallbackColor={fallbackColor} 
+              onModelAnalyzed={setAnalysis}
             />
           )}
         </Suspense>
@@ -78,74 +143,56 @@ export default function App() {
         <CameraResetController resetTrigger={resetCounter} />
       </Canvas>
 
-      {/* Floating Left-Side Sidebar (Branding + Controls) */}
       <div style={{ 
         position: "absolute", top: 20, left: 20, 
-        display: "flex", flexDirection: "column", gap: 16,
-        zIndex: 10
+        display: "flex", flexDirection: "column", gap: 14,
+        zIndex: 10, width: "240px"
       }}>
         
-        {/* Your Custom Studio Branding Title Block */}
         <div style={{
           background: "linear-gradient(135deg, #2196f3, #00e5ff)",
-          padding: "12px 20px",
-          borderRadius: 8,
-          color: "#ffffff",
-          fontFamily: "sans-serif",
-          fontWeight: "bold",
-          fontSize: "18px",
-          letterSpacing: "1px",
-          boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
-          textTransform: "uppercase",
-          textAlign: "center"
+          padding: "12px 20px", borderRadius: 8, color: "#ffffff",
+          fontFamily: "sans-serif", fontWeight: "bold", fontSize: "18px",
+          letterSpacing: "1px", boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+          textTransform: "uppercase", textAlign: "center"
         }}>
           PrintWise
         </div>
 
-        {/* Floating 3D Control Panel Container */}
         <div style={{ 
-          background: "rgba(0, 0, 0, 0.85)", padding: 20, 
+          background: "rgba(0, 0, 0, 0.85)", padding: 18, 
           borderRadius: 8, color: "#fff", fontFamily: "sans-serif",
-          boxShadow: "0 4px 12px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", gap: 14,
-          width: "240px"
+          boxShadow: "0 4px 12px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", gap: 12
         }}>
-          <h3 style={{ margin: 0, fontSize: "14px", letterSpacing: "0.5px", color: "#aaa" }}>
+          <h3 style={{ margin: 0, fontSize: "13px", letterSpacing: "0.5px", color: "#aaa" }}>
             Workspace Options
           </h3>
           
-          {/* File Input Button */}
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <label style={{ fontSize: "11px", color: "#888" }}>Upload Model File:</label>
             <input 
               type="file" 
               accept=".gltf,.glb,.obj,.stl,.fbx,.ply" 
               onChange={handleFileUpload}
-              style={{ color: "#fff", cursor: "pointer", fontSize: "13px", width: "100%" }}
+              style={{ color: "#fff", cursor: "pointer", fontSize: "12px", width: "100%" }}
             />
           </div>
 
           <hr style={{ border: "none", borderTop: "1px solid #333", margin: "2px 0" }} />
 
-          {/* Action Controls Group */}
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            
-            {/* Home Isometric Button */}
             <button 
               onClick={triggerHomeView}
               style={{
                 background: "#2196f3", color: "#fff", border: "none",
                 padding: "8px 12px", borderRadius: 4, cursor: "pointer",
-                fontWeight: "bold", fontSize: "13px", textAlign: "center",
-                transition: "background 0.2s"
+                fontWeight: "bold", fontSize: "12px", textAlign: "center"
               }}
-              onMouseOver={(e) => (e.currentTarget.style.background = "#1976d2")}
-              onMouseOut={(e) => (e.currentTarget.style.background = "#2196f3")}
             >
               Isometric Home View
             </button>
 
-            {/* Wireframe View option */}
-            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: "13px" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: "12px" }}>
               <input 
                 type="checkbox" 
                 checked={wireframe} 
@@ -154,15 +201,65 @@ export default function App() {
               Wireframe Overlay
             </label>
           </div>
+        </div>
 
-          {currentModel?.format && (
-            <div style={{ fontSize: "11px", color: "#4caf50", fontWeight: "bold", marginTop: 4 }}>
-              Active Asset: {currentModel.format.toUpperCase()} Engine Resolved
+        <div style={{ 
+          background: "rgba(0, 0, 0, 0.85)", padding: 18, 
+          borderRadius: 8, color: "#fff", fontFamily: "sans-serif",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", gap: 12
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <h3 style={{ margin: 0, fontSize: "13px", letterSpacing: "0.5px", color: "#aaa" }}>
+              Analysis Panel
+            </h3>
+            {analysis && (
+              <button
+                onClick={() => setUseInches(!useInches)}
+                style={{
+                  background: "#4caf50", color: "#fff", border: "none",
+                  padding: "4px 8px", borderRadius: 4, cursor: "pointer",
+                  fontSize: "11px", fontWeight: "bold"
+                }}
+              >
+                Unit: {useInches ? "IN" : "MM"}
+              </button>
+            )}
+          </div>
+
+          <hr style={{ border: "none", borderTop: "1px solid #333", margin: "2px 0" }} />
+
+          {analysis ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: "13px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#aaa" }}>X (Width):</span>
+                <span style={{ fontWeight: "bold", color: "#e91e63" }}>{formatDim(analysis.x)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#aaa" }}>Y (Depth):</span>
+                <span style={{ fontWeight: "bold", color: "#4caf50" }}>{formatDim(analysis.y)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#aaa" }}>Z (Height):</span>
+                <span style={{ fontWeight: "bold", color: "#2196f3" }}>{formatDim(analysis.z)}</span>
+              </div>
+              
+              <hr style={{ border: "none", borderTop: "1px solid #222", margin: "4px 0" }} />
+              
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#aaa" }}>Triangles:</span>
+                <span style={{ fontWeight: "bold", color: "#ff9800" }}>
+                  {analysis.triangles.toLocaleString()}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: "12px", color: "#666", textAlign: "center", padding: "6px 0" }}>
+              Upload a 3D asset file to populate printing analytics.
             </div>
           )}
         </div>
 
-      </div> {/* Closed sidebar container */}
-    </div> /* Closed main viewport parent container */
+      </div>
+    </div>
   );
 }

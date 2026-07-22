@@ -7,21 +7,16 @@ import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
 import { PLYLoader } from "three/addons/loaders/PLYLoader.js";
-// Change this line at the top
 import { Center } from "@react-three/drei";
-
 import type { LoadedModel } from "./types";
 
 interface ModelProps {
   model: LoadedModel;
   wireframe: boolean;
   fallbackColor: string;
+  onModelAnalyzed: (data: { x: number; y: number; z: number; triangles: number }) => void;
 }
 
-/**
- * Traverses an object tree to ensure color-accurate sRGB texture mapping 
- * and shadows are enabled for all mesh geometries.
- */
 function fixTextureColorSpace(object: THREE.Object3D) {
   if (!object) return;
   object.traverse((child) => {
@@ -42,9 +37,6 @@ function fixTextureColorSpace(object: THREE.Object3D) {
   });
 }
 
-/**
- * Toggles wireframe view dynamically across all child materials.
- */
 function applyDisplayOptions(object: THREE.Object3D, wireframe: boolean) {
   if (!object) return;
   object.traverse((child) => {
@@ -59,10 +51,6 @@ function applyDisplayOptions(object: THREE.Object3D, wireframe: boolean) {
     }
   });
 }
-
-/* ==========================================================================
-   Format-Specific Component Wrappers
-   ========================================================================== */
 
 function GltfModel({ url, wireframe }: { url: string; wireframe: boolean }) {
   const gltf = useLoader(GLTFLoader, url);
@@ -124,12 +112,8 @@ function StlModel({ url, wireframe, fallbackColor }: { url: string; wireframe: b
   const geometry = useLoader(STLLoader, url);
 
   useEffect(() => {
-    // 1. Force recalculation of surface normals so shadows reflect correctly
     geometry.computeVertexNormals();
-    
-    // 2. Rotate the geometry -90 degrees on the X-axis to convert CAD (Z-Up) to Web (Y-Up)
-    // Math.PI / 2 is exactly 90 degrees in radians
-    geometry.rotateX(-Math.PI / 2);
+    geometry.center();
   }, [geometry]);
 
   return (
@@ -138,7 +122,6 @@ function StlModel({ url, wireframe, fallbackColor }: { url: string; wireframe: b
     </mesh>
   );
 }
-
 
 function FbxModel({ url, wireframe }: { url: string; wireframe: boolean }) {
   const fbx = useLoader(FBXLoader, url);
@@ -172,21 +155,15 @@ function PlyModel({ url, wireframe, fallbackColor }: { url: string; wireframe: b
     </mesh>
   );
 }
-/* ==========================================================================
-   Main Orchestrator Component (Fine-Tuned Grid Gap Offset)
-   ========================================================================== */
 
-export default function Model({ model, wireframe, fallbackColor }: ModelProps) {
+export default function Model({ model, wireframe, fallbackColor, onModelAnalyzed }: ModelProps) {
   if (!model || !model.objectUrl) return null;
 
   let content: ReactNode;
 
   const isStlOrObj = ["stl", "obj"].includes(model.format?.toLowerCase() || "");
   const modelScale = isStlOrObj ? 0.05 : 1; 
-
-  // CHANGED THIS: Make the gap microscopic so it looks perfectly flush to your eyes,
-  // but just enough to stop the GPU from glitching the grid through the model faces.
-  const gridGapOffset = model.format?.toLowerCase() === "stl" ? 0.001 : 0;
+  const gridGapOffset = model.format?.toLowerCase() === "stl" ? 0.75 : 0;
 
   switch (model.format?.toLowerCase()) {
     case "glb":
@@ -226,8 +203,28 @@ export default function Model({ model, wireframe, fallbackColor }: ModelProps) {
           const size = new THREE.Vector3();
           box.getSize(size);
           
-          // Apply the microscopic micro-offset directly to the container's final height
-          targetGroup.position.y = ((size.y * modelScale) / 2) + gridGapOffset;
+          targetGroup.position.z = ((size.z * modelScale) / 2) + gridGapOffset;
+
+          let totalTriangles = 0;
+          targetGroup.traverse((child: any) => {
+            if (child.isMesh && child.geometry) {
+              const geom = child.geometry;
+              if (geom.index) {
+                totalTriangles += geom.index.count / 3;
+              } else if (geom.attributes.position) {
+                totalTriangles += geom.attributes.position.count / 3;
+              }
+            }
+          });
+
+          const originalScaleFactor = isStlOrObj ? 20 : 1;
+
+          onModelAnalyzed({
+            x: size.x * originalScaleFactor,
+            y: size.y * originalScaleFactor,
+            z: size.z * originalScaleFactor,
+            triangles: Math.round(totalTriangles)
+          });
         }
       }}
     >
