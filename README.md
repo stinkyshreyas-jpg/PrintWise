@@ -22,3 +22,6 @@ Created the PrintWise project.
 
 July 20, 2026:
 Added an STL Viewer with a grid view.
+
+July 21, 2026:
+Added basic measurements for STL's like height, width, depth, and triangle count.
