@@ -25,3 +25,6 @@ Added an STL Viewer with a grid view.
 
 July 21, 2026:
 Added basic measurements for STL's like height, width, depth, and triangle count.
+
+July 22, 2026:
+Added calculations for weight for PLA volume using Gaussian Divergence.
