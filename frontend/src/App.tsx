@@ -98,7 +98,7 @@ export default function App() {
 
     const zPoints = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 15)];
     const zGeom = new THREE.BufferGeometry().setFromPoints(zPoints);
-    const blueMat = new THREE.LineBasicMaterial({ color: 0x3B80E6, linewidth: 2 });
+    const blueMat = new THREE.LineBasicMaterial({ color: 0x3B80E6FF, linewidth: 2 });
     const zAxis = new THREE.Line(zGeom, blueMat);
 
     group.add(xAxis, yAxis, zAxis);
