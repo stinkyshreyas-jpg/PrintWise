@@ -1,12 +1,7 @@
-import { useEffect, useMemo, type ReactNode } from "react";
+import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { useLoader } from "@react-three/fiber";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
-import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
-import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
-import { PLYLoader } from "three/addons/loaders/PLYLoader.js";
 import { Center } from "@react-three/drei";
 import type { LoadedModel } from "./types";
 
@@ -14,46 +9,22 @@ interface ModelProps {
   model: LoadedModel;
   wireframe: boolean;
   fallbackColor: string;
-  onModelAnalyzed: (data: { 
-    x: number; 
-    y: number; 
-    z: number; 
-    triangles: number; 
-    volume: number; 
-    weight: number;
+  onModelAnalyzed: (data: {
+    x: number;
+    y: number;
+    z: number;
+    triangles: number;
+    volume: number;
     maxOverhang: number;
     facesOverThreshold: number;
     supportSurfacePercent: number;
+    surfaceArea: number;
+    wallArea: number;
+    capArea: number;
   }) => void;
 }
 
-function fixTextureColorSpace(object: THREE.Object3D) {
-  if (!object) return;
-  object.traverse((child) => {
-    if ((child as THREE.Mesh).isMesh) {
-      const mesh = child as THREE.Mesh;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-    }
-  });
-}
-
-function applyDisplayOptions(object: THREE.Object3D, wireframe: boolean) {
-  if (!object) return;
-  object.traverse((child) => {
-    if ((child as THREE.Mesh).isMesh) {
-      const mesh = child as THREE.Mesh;
-      if (mesh.material) {
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const mat of materials) {
-          (mat as THREE.Material & { wireframe?: boolean }).wireframe = wireframe;
-        }
-      }
-    }
-  });
-}
-
-function StlModel({ url, wireframe, fallbackColor, onMeshReady }: { url: string; wireframe: boolean; fallbackColor: string; onMeshReady: (mesh: THREE.Mesh) => void }) {
+function StlModel({ url, wireframe, onMeshReady }: { url: string; wireframe: boolean; onMeshReady: (mesh: THREE.Mesh) => void }) {
   const geometry = useLoader(STLLoader, url);
 
   const clonedGeometry = useMemo(() => {
@@ -66,20 +37,20 @@ function StlModel({ url, wireframe, fallbackColor, onMeshReady }: { url: string;
   }, [clonedGeometry]);
 
   return (
-    <mesh 
-      geometry={clonedGeometry} 
-      castShadow 
+    <mesh
+      geometry={clonedGeometry}
+      castShadow
       receiveShadow
       ref={(mesh) => {
         if (mesh) onMeshReady(mesh);
       }}
     >
-      <meshStandardMaterial 
-        color="#ffffff" 
-        vertexColors={true} 
-        roughness={0.4} 
-        metalness={0.15} 
-        wireframe={wireframe} 
+      <meshStandardMaterial
+        color="#ffffff"
+        vertexColors={true}
+        roughness={0.4}
+        metalness={0.15}
+        wireframe={wireframe}
       />
     </mesh>
   );
@@ -89,15 +60,14 @@ export default function Model({ model, wireframe, fallbackColor, onModelAnalyzed
   if (!model || !model.objectUrl) return null;
 
   const isStlOrObj = ["stl", "obj"].includes(model.format?.toLowerCase() || "");
-  const modelScale = isStlOrObj ? 0.05 : 1; 
-  const gridGapOffset = model.format?.toLowerCase() === "stl" ? 0.75: 0;
+  const modelScale = isStlOrObj ? 0.05 : 1;
 
   const handleMeshReady = (mesh: THREE.Mesh) => {
     const geom = mesh.geometry;
     if (!geom || !geom.attributes.position) return;
 
     geom.computeVertexNormals();
-    
+
     const position = geom.attributes.position;
     const normal = geom.attributes.normal;
     const index = geom.index;
@@ -108,6 +78,8 @@ export default function Model({ model, wireframe, fallbackColor, onModelAnalyzed
     let facesOverThreshold = 0;
     let totalSurfaceArea = 0;
     let supportSurfaceArea = 0;
+    let wallSurfaceArea = 0;
+    let capSurfaceArea = 0;
 
     const pA = new THREE.Vector3();
     const pB = new THREE.Vector3();
@@ -116,7 +88,7 @@ export default function Model({ model, wireframe, fallbackColor, onModelAnalyzed
     const nB = new THREE.Vector3();
     const nC = new THREE.Vector3();
     const faceNormal = new THREE.Vector3();
-    const gravity = new THREE.Vector3(0, 0, -1); 
+    const gravity = new THREE.Vector3(0, 0, -1);
 
     const colorArray = new Float32Array(position.count * 3);
     const defaultColor = new THREE.Color(fallbackColor);
@@ -146,6 +118,12 @@ export default function Model({ model, wireframe, fallbackColor, onModelAnalyzed
         faceNormal.copy(cross).normalize();
       }
 
+      if (Math.abs(faceNormal.z) < 0.3) {
+        wallSurfaceArea += area;
+      } else {
+        capSurfaceArea += area;
+      }
+
       let angleRad = Math.acos(Math.max(-1, Math.min(1, faceNormal.dot(gravity))));
       let angleDeg = angleRad * (180 / Math.PI);
 
@@ -154,7 +132,7 @@ export default function Model({ model, wireframe, fallbackColor, onModelAnalyzed
         if (angleDeg > maxOverhangRad) {
           maxOverhangRad = angleDeg;
         }
-        if (angleDeg >= 45) {
+        if (angleDeg >= 55) {
           facesOverThreshold++;
           supportSurfaceArea += area;
           isOverhang = true;
@@ -162,7 +140,7 @@ export default function Model({ model, wireframe, fallbackColor, onModelAnalyzed
       }
 
       const activeColor = isOverhang ? riskyColor : defaultColor;
-      
+
       colorArray[idx0 * 3] = activeColor.r;
       colorArray[idx0 * 3 + 1] = activeColor.g;
       colorArray[idx0 * 3 + 2] = activeColor.b;
@@ -194,9 +172,10 @@ export default function Model({ model, wireframe, fallbackColor, onModelAnalyzed
     box.getSize(size);
 
     const originalScaleFactor = isStlOrObj ? 20 : 1;
+
     const finalVolumeMm3 = Math.abs(totalVolume);
-    const finalVolumeCm3 = finalVolumeMm3 / 1000;
-    const plaWeightGrams = finalVolumeCm3 * 1.24;
+    const finalSurfaceAreaMm2 = totalSurfaceArea;
+
     const supportPercent = totalSurfaceArea > 0 ? (supportSurfaceArea / totalSurfaceArea) * 100 : 0;
 
     onModelAnalyzed({
@@ -205,15 +184,17 @@ export default function Model({ model, wireframe, fallbackColor, onModelAnalyzed
       z: size.z * originalScaleFactor,
       triangles: Math.round(totalTriangles),
       volume: finalVolumeMm3,
-      weight: plaWeightGrams,
       maxOverhang: Math.round(maxOverhangRad),
       facesOverThreshold,
-      supportSurfacePercent: Math.round(supportPercent * 10) / 10
+      supportSurfacePercent: Math.round(supportPercent * 10) / 10,
+      surfaceArea: finalSurfaceAreaMm2,
+      wallArea: wallSurfaceArea,
+      capArea: capSurfaceArea,
     });
   };
 
   if (model.format?.toLowerCase() !== "stl") {
-    return null; 
+    return null;
   }
 
   return (
@@ -221,15 +202,20 @@ export default function Model({ model, wireframe, fallbackColor, onModelAnalyzed
       onCentered={(props: any) => {
         const targetGroup = props.container || props.current;
         const box = props.boundingBox || props.box;
+
         if (targetGroup && box) {
           const size = new THREE.Vector3();
           box.getSize(size);
-          targetGroup.position.z = ((size.z * modelScale) / 2) + gridGapOffset;
+
+          targetGroup.position.set(0, 0, 0);
+
+          const absoluteMicroGap = 0.01;
+          targetGroup.position.z = -box.min.z + absoluteMicroGap;
         }
       }}
     >
       <group scale={[modelScale, modelScale, modelScale]}>
-        <StlModel url={model.objectUrl} wireframe={wireframe} fallbackColor={fallbackColor} onMeshReady={handleMeshReady} />
+        <StlModel url={model.objectUrl} wireframe={wireframe} onMeshReady={handleMeshReady} />
       </group>
     </Center>
   );

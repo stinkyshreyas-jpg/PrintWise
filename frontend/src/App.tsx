@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import Model from "./Model";
+import GridMotion from "./GridMotion";
 import type { LoadedModel } from "./types";
 
 interface AnalysisData {
@@ -11,13 +12,22 @@ interface AnalysisData {
   z: number;
   triangles: number;
   volume: number;
-  weight: number;
   maxOverhang: number;
   facesOverThreshold: number;
   supportSurfacePercent: number;
+  surfaceArea: number;
+  wallArea: number;
+  capArea: number;
 }
 
+const PLA_DENSITY_G_CM3 = 1.24;
 
+function computeWeightGrams(a: AnalysisData, infillPercent: number): number {
+  const solidWeight = (a.volume / 1000) * PLA_DENSITY_G_CM3;
+  const SHELL_FRACTION = 0.412;
+  const shellWeight = solidWeight * SHELL_FRACTION;
+  return shellWeight + (solidWeight - shellWeight) * (infillPercent / 100);
+}
 
 function CameraResetController({ resetTrigger }: { resetTrigger: number }) {
   const lastTrigger = useRef(resetTrigger);
@@ -59,13 +69,12 @@ function CameraResetController({ resetTrigger }: { resetTrigger: number }) {
 export default function App() {
   const [currentModel, setCurrentModel] = useState<LoadedModel | null>(null);
   const [wireframe, setWireframe] = useState<boolean>(false);
-  const [fallbackColor] = useState<string>("#cccccc");
+  const [fallbackColor] = useState<string>("#ffffff");
   const [resetCounter, setResetCounter] = useState<number>(0);
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
   const [useInches, setUseInches] = useState<boolean>(false);
-    const [infill, setInfill] = useState<number>(15);
+  const [infill, setInfill] = useState<number>(15);
   const [spoolPrice, setSpoolPrice] = useState<number>(20);
-
 
   const handleFileUpload = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -92,44 +101,41 @@ export default function App() {
     }
     return `${value.toFixed(1)} mm`;
   };
+
   const formatVolume = (value: number) => {
-  if (useInches) {
-    return `${(value * 0.000061023843).toFixed(4)} in³`;
-  }
-  return `${value.toFixed(1)} mm³`;
-};
-
-  const formatWeight = (value: number) => {
-    const adjustedWeight = value * (infill / 100);
-    return `${adjustedWeight.toFixed(2)} g`;
+    if (useInches) {
+      return `${(value * 0.000061023843).toFixed(4)} in³`;
+    }
+    return `${value.toFixed(1)} mm³`;
   };
-  const formatCost = (rawWeight: number) => {
-    const adjustedWeight = rawWeight * (infill / 100);
+
+  const formatWeight = (a: AnalysisData) => {
+    const grams = computeWeightGrams(a, infill);
+    return `${grams.toFixed(2)} g`;
+  };
+
+  const formatCost = (a: AnalysisData) => {
+    const grams = computeWeightGrams(a, infill);
     const costPerGram = spoolPrice / 1000;
-    const totalCost = adjustedWeight * costPerGram;
-    return `$${totalCost.toFixed(2)}`;
+    return `$${(grams * costPerGram).toFixed(2)}`;
   };
-
-
-
-
 
   const customAxesHelper = useMemo(() => {
     const group = new THREE.Group();
 
     const xPoints = [new THREE.Vector3(-15, 0, 0), new THREE.Vector3(15, 0, 0)];
     const xGeom = new THREE.BufferGeometry().setFromPoints(xPoints);
-    const redMat = new THREE.LineBasicMaterial({ color: 0xFF4554, linewidth: 2 });
+    const redMat = new THREE.LineBasicMaterial({ color: 0xEF4444, linewidth: 2 });
     const xAxis = new THREE.Line(xGeom, redMat);
 
     const yPoints = [new THREE.Vector3(0, -15, 0), new THREE.Vector3(0, 15, 0)];
     const yGeom = new THREE.BufferGeometry().setFromPoints(yPoints);
-    const greenMat = new THREE.LineBasicMaterial({ color: 0x80C627, linewidth: 2 });
+    const greenMat = new THREE.LineBasicMaterial({ color: 0x22C55E, linewidth: 2 });
     const yAxis = new THREE.Line(yGeom, greenMat);
 
     const zPoints = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 15)];
     const zGeom = new THREE.BufferGeometry().setFromPoints(zPoints);
-    const blueMat = new THREE.LineBasicMaterial({ color: 0x3B80E6FF, linewidth: 2 });
+    const blueMat = new THREE.LineBasicMaterial({ color: 0x3B82F6, linewidth: 2 });
     const zAxis = new THREE.Line(zGeom, blueMat);
 
     group.add(xAxis, yAxis, zAxis);
@@ -137,34 +143,34 @@ export default function App() {
   }, []);
 
   return (
-    <div style={{ width: "100vw", height: "100vh", background: "#111111", position: "relative" }}>
-      
-      <Canvas 
-        shadows 
+    <div style={{ width: "100vw", height: "100vh", background: "#ffffff", position: "relative" }}>
+      <Canvas
+        shadows
         camera={{ position: [12, -12, 12], fov: 45 }}
         onCreated={({ camera }) => {
           camera.up.set(0, 0, 1);
           camera.lookAt(0, 0, 0);
         }}
+        style={{ background: "#ffffff" }}
       >
         <ambientLight intensity={0.8} />
         <directionalLight position={[10, -10, 15]} intensity={1.5} castShadow />
         <pointLight position={[-5, 5, 5]} intensity={0.5} />
-        
-        <gridHelper 
-          args={[30, 30, "#333333", "#333333"]} 
-          position={[0, 0, -0.01]} 
+
+        <gridHelper
+          args={[30, 30, "#d4d4d4", "#d4d4d4"]}
+          position={[0, 0, -0.01]}
           rotation={[Math.PI / 2, 0, 0]}
         />
-        
+
         <primitive object={customAxesHelper} position={[0, 0, 0.005]} />
 
         <Suspense fallback={null}>
           {currentModel && (
-            <Model 
-              model={currentModel} 
-              wireframe={wireframe} 
-              fallbackColor={fallbackColor} 
+            <Model
+              model={currentModel}
+              wireframe={wireframe}
+              fallbackColor={fallbackColor}
               onModelAnalyzed={setAnalysis}
             />
           )}
@@ -174,52 +180,49 @@ export default function App() {
         <CameraResetController resetTrigger={resetCounter} />
       </Canvas>
 
-            {/* Floating Left-Side Sidebar Wrapper */}
-      <div style={{ 
-        position: "absolute", top: 20, left: 20, 
+      <div style={{
+        position: "absolute", top: 20, left: 20,
         display: "flex", flexDirection: "column", gap: 14,
         zIndex: 10, width: "240px", maxHeight: "calc(100vh - 40px)",
         overflowY: "auto", paddingRight: "4px"
       }}>
-        
-        {/* Studio Branding Block */}
         <div style={{
-          background: "linear-gradient(135deg, #2196f3, #00e5ff)",
+          background: "#000000",
           padding: "12px 20px", borderRadius: 8, color: "#ffffff",
-          fontFamily: "sans-serif", fontWeight: "bold", fontSize: "18px",
-          letterSpacing: "1px", boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+          fontWeight: "bold", fontSize: "18px",
+          letterSpacing: "1px", boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
           textTransform: "uppercase", textAlign: "center"
         }}>
           PrintWise
         </div>
 
-        {/* Floating 3D Control Panel Container */}
-        <div style={{ 
-          background: "rgba(0, 0, 0, 0.85)", padding: 18, 
-          borderRadius: 8, color: "#fff", fontFamily: "sans-serif",
-          boxShadow: "0 4px 12px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", gap: 12
+        <div style={{
+          background: "#ffffff", padding: 18,
+          borderRadius: 8, color: "#000000",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.08)", display: "flex", flexDirection: "column", gap: 12,
+          border: "1px solid #d4d4d4"
         }}>
-          <h3 style={{ margin: 0, fontSize: "13px", letterSpacing: "0.5px", color: "#aaa" }}>
+          <h3 style={{ margin: 0, fontSize: "13px", letterSpacing: "0.5px", color: "#000000" }}>
             Workspace Options
           </h3>
-          
+
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <label style={{ fontSize: "11px", color: "#888" }}>Upload Model File:</label>
-            <input 
-              type="file" 
-              accept=".gltf,.glb,.obj,.stl,.fbx,.ply" 
+            <label style={{ fontSize: "11px", color: "#000000" }}>Upload Model File:</label>
+            <input
+              type="file"
+              accept=".gltf,.glb,.obj,.stl,.fbx,.ply"
               onChange={handleFileUpload}
-              style={{ color: "#fff", cursor: "pointer", fontSize: "12px", width: "100%" }}
+              style={{ color: "#000000", cursor: "pointer", fontSize: "12px", width: "100%" }}
             />
           </div>
 
-          <hr style={{ border: "none", borderTop: "1px solid #333", margin: "2px 0" }} />
+          <hr style={{ border: "none", borderTop: "1px solid #d4d4d4", margin: "2px 0" }} />
 
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <button 
+            <button
               onClick={triggerHomeView}
               style={{
-                background: "#2196f3", color: "#fff", border: "none",
+                background: "#000000", color: "#ffffff", border: "none",
                 padding: "8px 12px", borderRadius: 4, cursor: "pointer",
                 fontWeight: "bold", fontSize: "12px", textAlign: "center"
               }}
@@ -227,169 +230,166 @@ export default function App() {
               Isometric Home View
             </button>
 
-            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: "12px" }}>
-              <input 
-                type="checkbox" 
-                checked={wireframe} 
-                onChange={(e) => setWireframe(e.target.checked)} 
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: "12px", color: "#000000" }}>
+              <input
+                type="checkbox"
+                checked={wireframe}
+                onChange={(e) => setWireframe(e.target.checked)}
               />
               Wireframe Overlay
             </label>
           </div>
         </div>
 
-        {/* ANALYSIS PANEL CONTAINER */}
-        <div style={{ 
-          background: "rgba(0, 0, 0, 0.85)", padding: 18, 
-          borderRadius: 8, color: "#fff", fontFamily: "sans-serif",
-          boxShadow: "0 4px 12px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", gap: 12,
-          maxHeight: "520px", overflowY: "auto"
+        <div style={{
+          borderRadius: 8, display: "flex", flexDirection: "column",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+          maxHeight: "520px", overflow: "hidden", position: "relative",
+          border: "1px solid #d4d4d4"
         }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <h3 style={{ margin: 0, fontSize: "13px", letterSpacing: "0.5px", color: "#aaa" }}>
-              Analysis Panel
-            </h3>
-            {analysis && (
-              <button
-                onClick={() => setUseInches(!useInches)}
-                style={{
-                  background: "#4caf50", color: "#fff", border: "none",
-                  padding: "4px 8px", borderRadius: 4, cursor: "pointer",
-                  fontSize: "11px", fontWeight: "bold"
-                }}
-              >
-                Unit: {useInches ? "IN" : "MM"}
-              </button>
+          <div style={{
+            position: "absolute", inset: 0, overflow: "hidden", borderRadius: 8, zIndex: 0
+          }}>
+            <GridMotion gradientColor="#000000" />
+          </div>
+          <div style={{
+            position: "relative", zIndex: 1,
+            background: "rgba(255,255,255,0.92)", padding: 18,
+            display: "flex", flexDirection: "column", gap: 12,
+            height: "100%", overflowY: "auto"
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <h3 style={{ margin: 0, fontSize: "13px", letterSpacing: "0.5px", color: "#000000" }}>
+                Analysis Panel
+              </h3>
+              {analysis && (
+                <button
+                  onClick={() => setUseInches(!useInches)}
+                  style={{
+                    background: "#000000", color: "#ffffff", border: "none",
+                    padding: "4px 8px", borderRadius: 4, cursor: "pointer",
+                    fontSize: "11px", fontWeight: "bold"
+                  }}
+                >
+                  Unit: {useInches ? "IN" : "MM"}
+                </button>
+              )}
+            </div>
+
+            <hr style={{ border: "none", borderTop: "1px solid #d4d4d4", margin: "2px 0" }} />
+
+            {analysis ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: "13px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#000000" }}>X (Width):</span>
+                  <span style={{ fontWeight: "bold", color: "#000000" }}>{formatDim(analysis.x)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#000000" }}>Y (Depth):</span>
+                  <span style={{ fontWeight: "bold", color: "#000000" }}>{formatDim(analysis.y)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#000000" }}>Z (Height):</span>
+                  <span style={{ fontWeight: "bold", color: "#000000" }}>{formatDim(analysis.z)}</span>
+                </div>
+
+                <hr style={{ border: "none", borderTop: "1px solid #d4d4d4", margin: "4px 0" }} />
+
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#000000" }}>Volume:</span>
+                  <span style={{ fontWeight: "bold", color: "#000000" }}>{formatVolume(analysis.volume)}</span>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#000000" }}>PLA Weight:</span>
+                  <span style={{ fontWeight: "bold", color: "#000000" }}>{formatWeight(analysis)}</span>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#000000" }}>Est. Cost:</span>
+                  <span style={{ fontWeight: "bold", color: "#000000" }}>{formatCost(analysis)}</span>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#000000" }}>Triangles:</span>
+                  <span style={{ fontWeight: "bold", color: "#000000" }}>
+                    {analysis.triangles.toLocaleString()}
+                  </span>
+                </div>
+
+                <hr style={{ border: "none", borderTop: "1px solid #d4d4d4", margin: "4px 0" }} />
+
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#000000", fontWeight: "bold" }}>
+                  <span>Overhang Specs:</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: "4px" }}>
+                  <span style={{ color: "#000000" }}>Max Overhang:</span>
+                  <span style={{ fontWeight: "bold", color: "#000000" }}>{analysis.maxOverhang}°</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: "4px" }}>
+                  <span style={{ color: "#000000" }}>Risky Faces:</span>
+                  <span style={{ fontWeight: "bold", color: "#000000" }}>{analysis.facesOverThreshold.toLocaleString()}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: "4px" }}>
+                  <span style={{ color: "#000000" }}>Support Area:</span>
+                  <span style={{ fontWeight: "bold", color: "#000000" }}>{analysis.supportSurfacePercent}%</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: "4px" }}>
+                  <span style={{ color: "#000000" }}>Support Risk: </span>
+                  <span style={{ fontWeight: "bold", color: "#000000" }}>
+                    {analysis.supportSurfacePercent === 0
+                      ? " NONE (Safe)"
+                      : analysis.supportSurfacePercent <= 5
+                      ? " LOW (Minor)"
+                      : analysis.supportSurfacePercent <= 15
+                      ? " MEDIUM (Recommended)"
+                      : " HIGH (Critical)"
+                    }
+                  </span>
+                </div>
+
+                <hr style={{ border: "none", borderTop: "1px solid #d4d4d4", margin: "4px 0" }} />
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#000000" }}>
+                    <span>Infill Density:</span>
+                    <span style={{ fontWeight: "bold", color: "#000000" }}>{infill}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="5"
+                    max="100"
+                    step="5"
+                    value={infill}
+                    onChange={(e) => setInfill(Number(e.target.value))}
+                    style={{ width: "100%", accentColor: "#000000", cursor: "pointer" }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#000000", fontSize: "11px" }}>Spool Price (1kg):</span>
+                    <span style={{ fontWeight: "bold", color: "#000000" }}>${spoolPrice}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="10"
+                    max="60"
+                    step="1"
+                    value={spoolPrice}
+                    onChange={(e) => setSpoolPrice(Number(e.target.value))}
+                    style={{ width: "100%", accentColor: "#000000", cursor: "pointer" }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div style={{ fontSize: "12px", color: "#000000", textAlign: "center", padding: "6px 0" }}>
+                Upload a 3D asset file to populate printing analytics.
+              </div>
             )}
           </div>
-
-          <hr style={{ border: "none", borderTop: "1px solid #333", margin: "2px 0" }} />
-
-          {analysis ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: "13px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#aaa" }}>X (Width):</span>
-                <span style={{ fontWeight: "bold", color: "#FF4554" }}>{formatDim(analysis.x)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#aaa" }}>Y (Depth):</span>
-                <span style={{ fontWeight: "bold", color: "#80C627" }}>{formatDim(analysis.y)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#aaa" }}>Z (Height):</span>
-                <span style={{ fontWeight: "bold", color: "#3B80E6" }}>{formatDim(analysis.z)}</span>
-              </div>
-              
-              <hr style={{ border: "none", borderTop: "1px solid #222", margin: "4px 0" }} />
-
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#aaa" }}>Volume:</span>
-                <span style={{ fontWeight: "bold", color: "#00e5ff" }}>{formatVolume(analysis.volume)}</span>
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#aaa" }}>PLA Weight:</span>
-                <span style={{ fontWeight: "bold", color: "#e91e63" }}>{formatWeight(analysis.weight)}</span>
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#aaa" }}>Est. Cost:</span>
-                <span style={{ fontWeight: "bold", color: "#00e5ff" }}>{formatCost(analysis.weight)}</span>
-              </div>
-              
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#aaa" }}>Triangles:</span>
-                <span style={{ fontWeight: "bold", color: "#ff9800" }}>
-                  {analysis.triangles.toLocaleString()}
-                </span>
-              </div>
-
-              <hr style={{ border: "none", borderTop: "1px solid #333", margin: "4px 0" }} />
-
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#ff3333", fontWeight: "bold" }}>
-                <span>Overhang Specs:</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: "4px" }}>
-                <span style={{ color: "#aaa" }}>Max Overhang:</span>
-                <span style={{ fontWeight: "bold" }}>{analysis.maxOverhang}°</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: "4px" }}>
-                <span style={{ color: "#aaa" }}>Risky Faces:</span>
-                <span style={{ fontWeight: "bold" }}>{analysis.facesOverThreshold.toLocaleString()}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: "4px" }}>
-                <span style={{ color: "#aaa" }}>Support Area:</span>
-                <span style={{ fontWeight: "bold" }}>{analysis.supportSurfacePercent}%</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: "4px" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: "4px" }}>
-                <span style={{ color: "#aaa" }}>Support Risk: </span>
-                <span style={{ 
-                  fontWeight: "bold", 
-                  color: analysis.supportSurfacePercent === 0 
-                    ? "#4caf50" 
-                    : analysis.supportSurfacePercent <= 5 
-                    ? "#ffeb3b" 
-                    : analysis.supportSurfacePercent <= 15 
-                    ? "#ff9800" 
-                    : "#ff3333"
-                }}>
-                  {analysis.supportSurfacePercent === 0 
-                    ? " NONE (Safe)" 
-                    : analysis.supportSurfacePercent <= 5 
-                    ? " LOW (Minor)" 
-                    : analysis.supportSurfacePercent <= 15 
-                    ? " MEDIUM (Recommended)" 
-                    : " HIGH (Critical)"
-                  }
-                </span>
-              </div>
-
-                
-              </div>
-
-              <hr style={{ border: "none", borderTop: "1px solid #333", margin: "4px 0" }} />
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#aaa" }}>
-                  <span>Infill Density:</span>
-                  <span style={{ fontWeight: "bold", color: "#4caf50" }}>{infill}%</span>
-                </div>
-                <input 
-                  type="range" 
-                  min="5" 
-                  max="100" 
-                  step="5"
-                  value={infill} 
-                  onChange={(e) => setInfill(Number(e.target.value))}
-                  style={{ width: "100%", accentColor: "#4caf50", cursor: "pointer" }}
-                />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ color: "#aaa", fontSize: "11px" }}>Spool Price (1kg):</span>
-                  <span style={{ fontWeight: "bold", color: "#2196f3" }}>${spoolPrice}</span>
-                </div>
-                <input 
-                  type="range" 
-                  min="10" 
-                  max="60" 
-                  step="1"
-                  value={spoolPrice} 
-                  onChange={(e) => setSpoolPrice(Number(e.target.value))}
-                  style={{ width: "100%", accentColor: "#2196f3", cursor: "pointer" }}
-                />
-              </div>
-            </div>
-          ) : (
-            <div style={{ fontSize: "12px", color: "#666", textAlign: "center", padding: "6px 0" }}>
-              Upload a 3D asset file to populate printing analytics.
-            </div>
-          )}
         </div>
-
-      </div> {/* Closes floating sidebar wrapper stack */}
-    </div> // Closes absolute outer root viewport layout wrapper
+      </div>
+    </div>
   );
 }
