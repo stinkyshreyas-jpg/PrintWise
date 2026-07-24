@@ -28,3 +28,9 @@ Added basic measurements for STL's like height, width, depth, and triangle count
 
 July 22, 2026:
 Added calculations for weight for PLA volume using Gaussian Divergence.
+
+July 23, 2026:
+Added STL Overhang Features and Support Risk
+
+July 24, 2026:
+Fixed weight calculations and different CSS style
