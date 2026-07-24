@@ -10,9 +10,13 @@ interface AnalysisData {
   y: number;
   z: number;
   triangles: number;
-  volume: number; // <-- Add this
-  weight: number; // <-- Add this
+  volume: number;
+  weight: number;
+  maxOverhang: number;
+  facesOverThreshold: number;
+  supportSurfacePercent: number;
 }
+
 
 
 function CameraResetController({ resetTrigger }: { resetTrigger: number }) {
@@ -59,6 +63,9 @@ export default function App() {
   const [resetCounter, setResetCounter] = useState<number>(0);
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
   const [useInches, setUseInches] = useState<boolean>(false);
+    const [infill, setInfill] = useState<number>(15);
+  const [spoolPrice, setSpoolPrice] = useState<number>(20);
+
 
   const handleFileUpload = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -92,9 +99,18 @@ export default function App() {
   return `${value.toFixed(1)} mm³`;
 };
 
-const formatWeight = (value: number) => {
-  return `${value.toFixed(2)} g`;
-};
+  const formatWeight = (value: number) => {
+    const adjustedWeight = value * (infill / 100);
+    return `${adjustedWeight.toFixed(2)} g`;
+  };
+  const formatCost = (rawWeight: number) => {
+    const adjustedWeight = rawWeight * (infill / 100);
+    const costPerGram = spoolPrice / 1000;
+    const totalCost = adjustedWeight * costPerGram;
+    return `$${totalCost.toFixed(2)}`;
+  };
+
+
 
 
 
@@ -158,12 +174,15 @@ const formatWeight = (value: number) => {
         <CameraResetController resetTrigger={resetCounter} />
       </Canvas>
 
+            {/* Floating Left-Side Sidebar Wrapper */}
       <div style={{ 
         position: "absolute", top: 20, left: 20, 
         display: "flex", flexDirection: "column", gap: 14,
-        zIndex: 10, width: "240px"
+        zIndex: 10, width: "240px", maxHeight: "calc(100vh - 40px)",
+        overflowY: "auto", paddingRight: "4px"
       }}>
         
+        {/* Studio Branding Block */}
         <div style={{
           background: "linear-gradient(135deg, #2196f3, #00e5ff)",
           padding: "12px 20px", borderRadius: 8, color: "#ffffff",
@@ -174,6 +193,7 @@ const formatWeight = (value: number) => {
           PrintWise
         </div>
 
+        {/* Floating 3D Control Panel Container */}
         <div style={{ 
           background: "rgba(0, 0, 0, 0.85)", padding: 18, 
           borderRadius: 8, color: "#fff", fontFamily: "sans-serif",
@@ -218,10 +238,12 @@ const formatWeight = (value: number) => {
           </div>
         </div>
 
+        {/* ANALYSIS PANEL CONTAINER */}
         <div style={{ 
           background: "rgba(0, 0, 0, 0.85)", padding: 18, 
           borderRadius: 8, color: "#fff", fontFamily: "sans-serif",
-          boxShadow: "0 4px 12px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", gap: 12
+          boxShadow: "0 4px 12px rgba(0,0,0,0.5)", display: "flex", flexDirection: "column", gap: 12,
+          maxHeight: "520px", overflowY: "auto"
         }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <h3 style={{ margin: 0, fontSize: "13px", letterSpacing: "0.5px", color: "#aaa" }}>
@@ -247,18 +269,33 @@ const formatWeight = (value: number) => {
             <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: "13px" }}>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "#aaa" }}>X (Width):</span>
-                <span style={{ fontWeight: "bold", color: "#e91e63" }}>{formatDim(analysis.x)}</span>
+                <span style={{ fontWeight: "bold", color: "#FF4554" }}>{formatDim(analysis.x)}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "#aaa" }}>Y (Depth):</span>
-                <span style={{ fontWeight: "bold", color: "#4caf50" }}>{formatDim(analysis.y)}</span>
+                <span style={{ fontWeight: "bold", color: "#80C627" }}>{formatDim(analysis.y)}</span>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "#aaa" }}>Z (Height):</span>
-                <span style={{ fontWeight: "bold", color: "#2196f3" }}>{formatDim(analysis.z)}</span>
+                <span style={{ fontWeight: "bold", color: "#3B80E6" }}>{formatDim(analysis.z)}</span>
               </div>
               
               <hr style={{ border: "none", borderTop: "1px solid #222", margin: "4px 0" }} />
+
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#aaa" }}>Volume:</span>
+                <span style={{ fontWeight: "bold", color: "#00e5ff" }}>{formatVolume(analysis.volume)}</span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#aaa" }}>PLA Weight:</span>
+                <span style={{ fontWeight: "bold", color: "#e91e63" }}>{formatWeight(analysis.weight)}</span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#aaa" }}>Est. Cost:</span>
+                <span style={{ fontWeight: "bold", color: "#00e5ff" }}>{formatCost(analysis.weight)}</span>
+              </div>
               
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "#aaa" }}>Triangles:</span>
@@ -266,16 +303,84 @@ const formatWeight = (value: number) => {
                   {analysis.triangles.toLocaleString()}
                 </span>
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-  <span style={{ color: "#aaa" }}>Volume:</span>
-  <span style={{ fontWeight: "bold", color: "#00e5ff" }}>{formatVolume(analysis.volume)}</span>
-</div>
 
-<div style={{ display: "flex", justifyContent: "space-between" }}>
-  <span style={{ color: "#aaa" }}>PLA Weight:</span>
-  <span style={{ fontWeight: "bold", color: "#e91e63" }}>{formatWeight(analysis.weight)}</span>
-</div>
+              <hr style={{ border: "none", borderTop: "1px solid #333", margin: "4px 0" }} />
 
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#ff3333", fontWeight: "bold" }}>
+                <span>Overhang Specs:</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: "4px" }}>
+                <span style={{ color: "#aaa" }}>Max Overhang:</span>
+                <span style={{ fontWeight: "bold" }}>{analysis.maxOverhang}°</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: "4px" }}>
+                <span style={{ color: "#aaa" }}>Risky Faces:</span>
+                <span style={{ fontWeight: "bold" }}>{analysis.facesOverThreshold.toLocaleString()}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: "4px" }}>
+                <span style={{ color: "#aaa" }}>Support Area:</span>
+                <span style={{ fontWeight: "bold" }}>{analysis.supportSurfacePercent}%</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: "4px" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", paddingLeft: "4px" }}>
+                <span style={{ color: "#aaa" }}>Support Risk: </span>
+                <span style={{ 
+                  fontWeight: "bold", 
+                  color: analysis.supportSurfacePercent === 0 
+                    ? "#4caf50" 
+                    : analysis.supportSurfacePercent <= 5 
+                    ? "#ffeb3b" 
+                    : analysis.supportSurfacePercent <= 15 
+                    ? "#ff9800" 
+                    : "#ff3333"
+                }}>
+                  {analysis.supportSurfacePercent === 0 
+                    ? " NONE (Safe)" 
+                    : analysis.supportSurfacePercent <= 5 
+                    ? " LOW (Minor)" 
+                    : analysis.supportSurfacePercent <= 15 
+                    ? " MEDIUM (Recommended)" 
+                    : " HIGH (Critical)"
+                  }
+                </span>
+              </div>
+
+                
+              </div>
+
+              <hr style={{ border: "none", borderTop: "1px solid #333", margin: "4px 0" }} />
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#aaa" }}>
+                  <span>Infill Density:</span>
+                  <span style={{ fontWeight: "bold", color: "#4caf50" }}>{infill}%</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="5" 
+                  max="100" 
+                  step="5"
+                  value={infill} 
+                  onChange={(e) => setInfill(Number(e.target.value))}
+                  style={{ width: "100%", accentColor: "#4caf50", cursor: "pointer" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#aaa", fontSize: "11px" }}>Spool Price (1kg):</span>
+                  <span style={{ fontWeight: "bold", color: "#2196f3" }}>${spoolPrice}</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="10" 
+                  max="60" 
+                  step="1"
+                  value={spoolPrice} 
+                  onChange={(e) => setSpoolPrice(Number(e.target.value))}
+                  style={{ width: "100%", accentColor: "#2196f3", cursor: "pointer" }}
+                />
+              </div>
             </div>
           ) : (
             <div style={{ fontSize: "12px", color: "#666", textAlign: "center", padding: "6px 0" }}>
@@ -284,7 +389,7 @@ const formatWeight = (value: number) => {
           )}
         </div>
 
-      </div>
-    </div>
+      </div> {/* Closes floating sidebar wrapper stack */}
+    </div> // Closes absolute outer root viewport layout wrapper
   );
 }
