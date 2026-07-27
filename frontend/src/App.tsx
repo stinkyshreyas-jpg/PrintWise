@@ -256,18 +256,6 @@ export default function App() {
   
   const formatDim = (val: number) => useInches ? (val / 25.4).toFixed(2) + " in" : val.toFixed(1) + " mm";
   const formatVolume = (val: number) => useInches ? (val / 16387).toFixed(2) + " in³" : (val / 1000).toFixed(1) + " cm³";
-
-  // FIX: previously these recomputed weight/cost from scratch using a naive
-  // (volume * density * infillRatio) formula, which ignores shell/wall/cap
-  // thickness entirely and scales the ENTIRE model — including the solid
-  // shell, which doesn't change with infill — down by the infill ratio.
-  // That's what caused the oversized swings vs Bambu Studio when changing
-  // infill, and why editing Model.tsx's calc appeared to do nothing: this
-  // formula never used Model.tsx's output in the first place.
-  //
-  // Model.tsx already computes the correct shell+infill-aware weight and
-  // cost in `analysis.estimatedWeightGrams` / `analysis.estimatedMaterialCost`
-  // — just read those directly instead of recalculating.
   const formatWeight = (a: any) => a ? a.estimatedWeightGrams.toFixed(1) + " g" : "0 g";
   const formatCost = (a: any) => a ? "$" + a.estimatedMaterialCost.toFixed(2) : "$0.00";
 
