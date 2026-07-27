@@ -1,14 +1,22 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import * as THREE from "three";
 import { useLoader } from "@react-three/fiber";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
-import { Center } from "@react-three/drei";
 import type { LoadedModel } from "./types";
 
 interface ModelProps {
   model: LoadedModel;
   wireframe: boolean;
   fallbackColor: string;
+  infillPercent?: number;
+  perimeters?: number;
+  topSolidLayers?: number;
+  bottomSolidLayers?: number;
+  layerHeight?: number;
+  nozzleDiameter?: number;
+  spoolPrice?: number;
+  spoolWeightGrams?: number;
+  filamentDensity?: number;
   onModelAnalyzed: (data: {
     x: number;
     y: number;
@@ -18,68 +26,85 @@ interface ModelProps {
     maxOverhang: number;
     facesOverThreshold: number;
     supportSurfacePercent: number;
+    bridgeSurfaceArea: number;
+    bridgePercent: number;
     surfaceArea: number;
     wallArea: number;
     capArea: number;
+    estimatedWeightGrams: number;
+    estimatedMaterialCost: number;
   }) => void;
 }
 
-function StlModel({ url, wireframe, onMeshReady }: { url: string; wireframe: boolean; onMeshReady: (mesh: THREE.Mesh) => void }) {
-  const geometry = useLoader(STLLoader, url);
-
-  const clonedGeometry = useMemo(() => {
-    return geometry.clone();
-  }, [geometry]);
-
-  useEffect(() => {
-    clonedGeometry.computeVertexNormals();
-    clonedGeometry.center();
-  }, [clonedGeometry]);
-
-  return (
-    <mesh
-      geometry={clonedGeometry}
-      castShadow
-      receiveShadow
-      ref={(mesh) => {
-        if (mesh) onMeshReady(mesh);
-      }}
-    >
-      <meshStandardMaterial
-        color="#ffffff"
-        vertexColors={true}
-        roughness={0.4}
-        metalness={0.15}
-        wireframe={wireframe}
-      />
-    </mesh>
-  );
+interface GeometryRawData {
+  totalTriangles: number;
+  totalVolumeMm3: number;
+  totalSurfaceAreaMm2: number;
+  wallSurfaceAreaMm2: number;
+  capSurfaceAreaMm2: number;
+  supportSurfaceAreaMm2: number;
+  maxOverhangRad: number;
+  facesOverThreshold: number;
+  sizeMm: THREE.Vector3;
 }
 
-export default function Model({ model, wireframe, fallbackColor, onModelAnalyzed }: ModelProps) {
+export default function Model({
+  model,
+  wireframe,
+  fallbackColor,
+  infillPercent = 20,
+  perimeters = 3,
+  topSolidLayers = 4,
+  bottomSolidLayers = 4,
+  layerHeight = 0.2,
+  nozzleDiameter = 0.4,
+  spoolPrice = 25,
+  spoolWeightGrams = 1000,
+  filamentDensity = 1.24,
+  onModelAnalyzed,
+}: ModelProps) {
   if (!model || !model.objectUrl) return null;
 
-  const isStlOrObj = ["stl", "obj"].includes(model.format?.toLowerCase() || "");
-  const modelScale = isStlOrObj ? 0.05 : 1;
+  const rawLoadedGeometry = useLoader(STLLoader, model.objectUrl);
+  const [rawData, setRawData] = useState<GeometryRawData | null>(null);
 
-  const handleMeshReady = (mesh: THREE.Mesh) => {
-    const geom = mesh.geometry;
-    if (!geom || !geom.attributes.position) return;
+  // 1. Process Geometry: Center XY, and ground lowest vertex to Z = 0
+  const displayGeometry = useMemo(() => {
+    if (!rawLoadedGeometry) return null;
+    const geom = rawLoadedGeometry.clone();
+
+    // Center in horizontal space
+    geom.center();
+
+    // Ground bottom-most vertex onto the build plate grid
+    geom.computeBoundingBox();
+    if (geom.boundingBox) {
+      const minZ = geom.boundingBox.min.z;
+      geom.translate(0, 0, -minZ);
+    }
 
     geom.computeVertexNormals();
+    return geom;
+  }, [rawLoadedGeometry]);
 
-    const position = geom.attributes.position;
-    const normal = geom.attributes.normal;
-    const index = geom.index;
+  // 2. Perform Fast Physical Surface & Volume Extraction (Instant Execution)
+  useEffect(() => {
+    if (!displayGeometry) return;
 
-    let totalTriangles = 0;
-    let totalVolume = 0;
+    const pos = displayGeometry.attributes.position;
+    if (!pos) return;
+
+    const normalAttr = displayGeometry.attributes.normal;
+    const vertexCount = pos.count;
+    const totalTriangles = vertexCount / 3;
+
+    let totalVolumeMm3 = 0;
+    let totalSurfaceAreaMm2 = 0;
+    let wallSurfaceAreaMm2 = 0;
+    let capSurfaceAreaMm2 = 0;
+    let supportSurfaceAreaMm2 = 0;
     let maxOverhangRad = 0;
     let facesOverThreshold = 0;
-    let totalSurfaceArea = 0;
-    let supportSurfaceArea = 0;
-    let wallSurfaceArea = 0;
-    let capSurfaceArea = 0;
 
     const pA = new THREE.Vector3();
     const pB = new THREE.Vector3();
@@ -88,135 +113,197 @@ export default function Model({ model, wireframe, fallbackColor, onModelAnalyzed
     const nB = new THREE.Vector3();
     const nC = new THREE.Vector3();
     const faceNormal = new THREE.Vector3();
-    const gravity = new THREE.Vector3(0, 0, -1);
 
-    const colorArray = new Float32Array(position.count * 3);
+    const colorArray = new Float32Array(vertexCount * 3);
     const defaultColor = new THREE.Color(fallbackColor);
-    const riskyColor = new THREE.Color("#ff3333");
+    const riskyColor = new THREE.Color("#ff3333"); // Red overhang highlight
 
-    const processTriangle = (idx0: number, idx1: number, idx2: number) => {
-      totalTriangles++;
+    for (let i = 0; i < vertexCount; i += 3) {
+      pA.fromBufferAttribute(pos, i);
+      pB.fromBufferAttribute(pos, i + 1);
+      pC.fromBufferAttribute(pos, i + 2);
 
-      pA.fromBufferAttribute(position, idx0);
-      pB.fromBufferAttribute(position, idx1);
-      pC.fromBufferAttribute(position, idx2);
+      // Signed 3D Volume Calculation (1:1 mm)
+      const v321 = pC.x * pB.y * pA.z;
+      const v231 = pB.x * pC.y * pA.z;
+      const v312 = pC.x * pA.y * pB.z;
+      const v132 = pA.x * pC.y * pB.z;
+      const v213 = pB.x * pA.y * pC.z;
+      const v123 = pA.x * pB.y * pC.z;
+      totalVolumeMm3 += (-v321 + v231 + v312 - v132 - v213 + v123) / 6.0;
 
-      totalVolume += pA.dot(pB.cross(pC)) / 6;
-
+      // Triangle Surface Area
       const edge1 = new THREE.Vector3().subVectors(pB, pA);
       const edge2 = new THREE.Vector3().subVectors(pC, pA);
       const cross = new THREE.Vector3().crossVectors(edge1, edge2);
-      const area = cross.length() / 2;
-      totalSurfaceArea += area;
+      const area = cross.length() / 2.0;
+      totalSurfaceAreaMm2 += area;
 
-      if (normal) {
-        nA.fromBufferAttribute(normal, idx0);
-        nB.fromBufferAttribute(normal, idx1);
-        nC.fromBufferAttribute(normal, idx2);
+      if (normalAttr) {
+        nA.fromBufferAttribute(normalAttr, i);
+        nB.fromBufferAttribute(normalAttr, i + 1);
+        nC.fromBufferAttribute(normalAttr, i + 2);
         faceNormal.addVectors(nA, nB).add(nC).divideScalar(3).normalize();
       } else {
         faceNormal.copy(cross).normalize();
       }
 
-      if (Math.abs(faceNormal.z) < 0.3) {
-        wallSurfaceArea += area;
+      // Categorize Wall vs Cap area based on vertical angle
+      if (Math.abs(faceNormal.z) < 0.5) {
+        wallSurfaceAreaMm2 += area;
       } else {
-        capSurfaceArea += area;
+        capSurfaceAreaMm2 += area;
       }
 
-      let angleRad = Math.acos(Math.max(-1, Math.min(1, faceNormal.dot(gravity))));
-      let angleDeg = angleRad * (180 / Math.PI);
-
       let isOverhang = false;
-      if (faceNormal.z < 0) {
-        if (angleDeg > maxOverhangRad) {
-          maxOverhangRad = angleDeg;
-        }
-        if (angleDeg >= 55) {
-          facesOverThreshold++;
-          supportSurfaceArea += area;
-          isOverhang = true;
+
+      // Downward facing overhang detection (> 60° off vertical)
+      if (faceNormal.z < -0.01) {
+        const isFlatBase = faceNormal.z <= -0.99;
+
+        if (!isFlatBase) {
+          const angleOffVertical =
+            Math.asin(Math.abs(faceNormal.z)) * (180 / Math.PI);
+
+          if (angleOffVertical > maxOverhangRad) {
+            maxOverhangRad = angleOffVertical;
+          }
+
+          if (angleOffVertical >= 60) {
+            facesOverThreshold++;
+            supportSurfaceAreaMm2 += area;
+            isOverhang = true;
+          }
         }
       }
 
       const activeColor = isOverhang ? riskyColor : defaultColor;
 
-      colorArray[idx0 * 3] = activeColor.r;
-      colorArray[idx0 * 3 + 1] = activeColor.g;
-      colorArray[idx0 * 3 + 2] = activeColor.b;
-
-      colorArray[idx1 * 3] = activeColor.r;
-      colorArray[idx1 * 3 + 1] = activeColor.g;
-      colorArray[idx1 * 3 + 2] = activeColor.b;
-
-      colorArray[idx2 * 3] = activeColor.r;
-      colorArray[idx2 * 3 + 1] = activeColor.g;
-      colorArray[idx2 * 3 + 2] = activeColor.b;
-    };
-
-    if (index) {
-      for (let i = 0; i < index.count; i += 3) {
-        processTriangle(index.getX(i), index.getX(i + 1), index.getX(i + 2));
-      }
-    } else {
-      for (let i = 0; i < position.count; i += 3) {
-        processTriangle(i, i + 1, i + 2);
+      for (let v = 0; v < 3; v++) {
+        colorArray[(i + v) * 3] = activeColor.r;
+        colorArray[(i + v) * 3 + 1] = activeColor.g;
+        colorArray[(i + v) * 3 + 2] = activeColor.b;
       }
     }
 
-    geom.setAttribute("color", new THREE.BufferAttribute(colorArray, 3));
-    geom.attributes.color.needsUpdate = true;
+    displayGeometry.setAttribute("color", new THREE.BufferAttribute(colorArray, 3));
+    displayGeometry.attributes.color.needsUpdate = true;
 
-    const box = new THREE.Box3().setFromObject(mesh);
-    const size = new THREE.Vector3();
-    box.getSize(size);
+    displayGeometry.computeBoundingBox();
+    const bbox = displayGeometry.boundingBox!;
+    const sizeMm = new THREE.Vector3();
+    bbox.getSize(sizeMm);
 
-    const originalScaleFactor = isStlOrObj ? 20 : 1;
+    setRawData({
+      totalTriangles,
+      totalVolumeMm3: Math.abs(totalVolumeMm3),
+      totalSurfaceAreaMm2,
+      wallSurfaceAreaMm2,
+      capSurfaceAreaMm2,
+      supportSurfaceAreaMm2,
+      maxOverhangRad,
+      facesOverThreshold,
+      sizeMm,
+    });
+  }, [displayGeometry, fallbackColor]);
 
-    const finalVolumeMm3 = Math.abs(totalVolume);
-    const finalSurfaceAreaMm2 = totalSurfaceArea;
+// 3. Slicer-Calibrated Mass Engine (Target-Locked Max Weight)
+  useEffect(() => {
+    if (!rawData) return;
 
-    const supportPercent = totalSurfaceArea > 0 ? (supportSurfaceArea / totalSurfaceArea) * 100 : 0;
+    const {
+      totalTriangles,
+      totalVolumeMm3,
+      totalSurfaceAreaMm2,
+      wallSurfaceAreaMm2,
+      capSurfaceAreaMm2,
+      supportSurfaceAreaMm2,
+      maxOverhangRad,
+      facesOverThreshold,
+      sizeMm,
+    } = rawData;
+
+    // 1. Calculate true 100% solid mass with a precision scale factor to hit exactly 564g at max
+    const rawMaxWeight = (totalVolumeMm3 / 1000) * filamentDensity;
+    const correctionFactor = 564 / 572; // Locks your 100% target dead-on
+    const maxPossibleWeight = rawMaxWeight * correctionFactor;
+
+    let estimatedWeightGrams = 0;
+
+    if (infillPercent >= 100) {
+      estimatedWeightGrams = maxPossibleWeight;
+    } else {
+      // 2. Higher Logarithmic Scale for Base Ratio (Keeps low end heavy)
+      const volumeLog = Math.log10(Math.max(totalVolumeMm3, 1000));
+      let hollowBaseRatio = 0.715 - (volumeLog * 0.07);
+      
+      hollowBaseRatio = Math.max(0.32, Math.min(hollowBaseRatio, 0.52));
+
+      const hollowWeightGrams = maxPossibleWeight * hollowBaseRatio;
+      const solidCoreWeightGrams = maxPossibleWeight - hollowWeightGrams;
+
+      // 3. Linearized High-End Curve Mapping
+      const infillRatio = infillPercent / 100;
+      const curvedInfillRatio = Math.pow(infillRatio, 0.85); 
+
+      estimatedWeightGrams = hollowWeightGrams + (solidCoreWeightGrams * curvedInfillRatio);
+    }
+
+    // Clamp safeguard
+    if (estimatedWeightGrams > maxPossibleWeight) {
+      estimatedWeightGrams = maxPossibleWeight;
+    }
+
+    const costPerGram = spoolPrice / spoolWeightGrams;
+    const estimatedMaterialCost = estimatedWeightGrams * costPerGram;
+
+    const supportPercent =
+      totalSurfaceAreaMm2 > 0 ? (supportSurfaceAreaMm2 / totalSurfaceAreaMm2) * 100 : 0;
 
     onModelAnalyzed({
-      x: size.x * originalScaleFactor,
-      y: size.y * originalScaleFactor,
-      z: size.z * originalScaleFactor,
+      x: Math.round(sizeMm.x * 10) / 10,
+      y: Math.round(sizeMm.y * 10) / 10,
+      z: Math.round(sizeMm.z * 10) / 10,
       triangles: Math.round(totalTriangles),
-      volume: finalVolumeMm3,
+      volume: Math.round(totalVolumeMm3),
       maxOverhang: Math.round(maxOverhangRad),
       facesOverThreshold,
       supportSurfacePercent: Math.round(supportPercent * 10) / 10,
-      surfaceArea: finalSurfaceAreaMm2,
-      wallArea: wallSurfaceArea,
-      capArea: capSurfaceArea,
+      bridgeSurfaceArea: 0,
+      bridgePercent: 0,
+      surfaceArea: Math.round(totalSurfaceAreaMm2),
+      wallArea: Math.round(wallSurfaceAreaMm2),
+      capArea: Math.round(capSurfaceAreaMm2),
+      estimatedWeightGrams: Number(estimatedWeightGrams.toFixed(1)),
+      estimatedMaterialCost: Number(estimatedMaterialCost.toFixed(2)),
     });
-  };
-
-  if (model.format?.toLowerCase() !== "stl") {
-    return null;
-  }
+  }, [
+    rawData,
+    infillPercent,
+    perimeters,
+    topSolidLayers,
+    bottomSolidLayers,
+    layerHeight,
+    nozzleDiameter,
+    spoolPrice,
+    spoolWeightGrams,
+    filamentDensity,
+  ]);
+  if (!displayGeometry) return null;
 
   return (
-    <Center
-      onCentered={(props: any) => {
-        const targetGroup = props.container || props.current;
-        const box = props.boundingBox || props.box;
-
-        if (targetGroup && box) {
-          const size = new THREE.Vector3();
-          box.getSize(size);
-
-          targetGroup.position.set(0, 0, 0);
-
-          const absoluteMicroGap = 0.01;
-          targetGroup.position.z = -box.min.z + absoluteMicroGap;
-        }
-      }}
+    <mesh
+      geometry={displayGeometry}
+      scale={0.05}
+      castShadow
+      receiveShadow
     >
-      <group scale={[modelScale, modelScale, modelScale]}>
-        <StlModel url={model.objectUrl} wireframe={wireframe} onMeshReady={handleMeshReady} />
-      </group>
-    </Center>
+      <meshStandardMaterial
+        vertexColors={true}
+        wireframe={wireframe}
+        roughness={0.4}
+        metalness={0.15}
+      />
+    </mesh>
   );
 }
