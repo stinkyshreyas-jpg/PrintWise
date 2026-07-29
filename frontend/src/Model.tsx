@@ -57,7 +57,7 @@ export default function Model({
   topSolidLayers = 7,
   bottomSolidLayers = 5,
   layerHeight = 0.2,
-  nozzleDiameter = 0.4,
+  nozzleDiameter = 0.2,
   spoolPrice = 25,
   spoolWeightGrams = 1000,
   filamentDensity = 1.24,
@@ -68,15 +68,15 @@ export default function Model({
   const rawLoadedGeometry = useLoader(STLLoader, model.objectUrl);
   const [rawData, setRawData] = useState<GeometryRawData | null>(null);
 
-  // 1. Process Geometry: Center XY, and ground lowest vertex to Z = 0
+  
   const displayGeometry = useMemo(() => {
     if (!rawLoadedGeometry) return null;
     const geom = rawLoadedGeometry.clone();
 
-    // Center in horizontal space
+    
     geom.center();
 
-    // Ground bottom-most vertex onto the build plate grid
+    
     geom.computeBoundingBox();
     if (geom.boundingBox) {
       const minZ = geom.boundingBox.min.z;
@@ -87,7 +87,7 @@ export default function Model({
     return geom;
   }, [rawLoadedGeometry]);
 
-  // 2. Fast Physical Surface & Volume Extraction
+  
   useEffect(() => {
     if (!displayGeometry) return;
 
@@ -123,7 +123,7 @@ export default function Model({
       pB.fromBufferAttribute(pos, i + 1);
       pC.fromBufferAttribute(pos, i + 2);
 
-      // Volume calculation via Signed Volume of Tetrahedrons
+      
       const v321 = pC.x * pB.y * pA.z;
       const v231 = pB.x * pC.y * pA.z;
       const v312 = pC.x * pA.y * pB.z;
@@ -132,7 +132,7 @@ export default function Model({
       const v123 = pA.x * pB.y * pC.z;
       totalVolumeMm3 += (-v321 + v231 + v312 - v132 - v213 + v123) / 6.0;
 
-      // Triangle Surface Area
+      
       const edge1 = new THREE.Vector3().subVectors(pB, pA);
       const edge2 = new THREE.Vector3().subVectors(pC, pA);
       const cross = new THREE.Vector3().crossVectors(edge1, edge2);
@@ -148,7 +148,7 @@ export default function Model({
         faceNormal.copy(cross).normalize();
       }
 
-      // Classify vertical walls vs horizontal caps/top/bottom surfaces
+      
       if (Math.abs(faceNormal.z) < 0.5) {
         wallSurfaceAreaMm2 += area;
       } else {
@@ -206,10 +206,10 @@ export default function Model({
     });
   }, [displayGeometry, fallbackColor]);
 
-// 3. Dynamic Volumetric Slicer Calculations (Sub-5g Precision Engine + Console Table Generator)
-// 3. Dynamic Volumetric Slicer Calculations (Sub-5g Precision Engine + Console Table)
-// 3. Dynamic Volumetric Slicer Calculations (Strict Sub-5g Precision Engine)
-// 3. Dynamic Volumetric Slicer Calculations (The Perfect Slicer Engine)
+
+
+
+
 useEffect(() => {
   if (!rawData) return;
 
@@ -225,7 +225,7 @@ useEffect(() => {
     sizeMm,
   } = rawData;
 
-  // 1. Slicer Extrusion Parameters
+  
   const lineThicknessMm = nozzleDiameter * 1.05; 
   const wallThicknessMm = perimeters * lineThicknessMm; 
 
@@ -233,7 +233,7 @@ useEffect(() => {
   const bottomThicknessMm = bottomSolidLayers * layerHeight;
   const avgCapThicknessMm = (topThicknessMm + bottomThicknessMm) / 2;
 
-  // 2. Effective Wall Thickness & Shell Volume
+  
   const totalArea = Math.max(1, totalSurfaceAreaMm2);
   const wallWeight = wallSurfaceAreaMm2 / totalArea;
   const capWeight = capSurfaceAreaMm2 / totalArea;
@@ -249,27 +249,27 @@ useEffect(() => {
   const calculatedShellVolumeMm3 = totalSurfaceAreaMm2 * effectiveThicknessMm * SHELL_CORRECTION;
   const totalShellVolumeMm3 = Math.min(totalVolumeMm3, calculatedShellVolumeMm3);
   
-  // 3. Cavity & Max Weight Caps
+  
   const cavityVolumeMm3 = Math.max(0, totalVolumeMm3 - totalShellVolumeMm3);
   const maxPossibleWeightGrams = (totalVolumeMm3 / 1000) * filamentDensity;
   const bambuMaxWeightCap = maxPossibleWeightGrams * 0.985;
 
-  // --- DEBUG: GENERATE COPY-PASTABLE RAW COLUMN FOR SHEETS ---
+  
   const debugWeights: string[] = [];
   for (let inf = 5; inf <= 100; inf += 5) {
     const ratio = inf / 100;
     
-    // The perfect base curve for 5% to 70%
+    
     let eff = 0.86 + (0.13 * Math.pow(ratio, 0.4));
     
-    // THE FIX: High-Infill Dampener
-    // Mimics the physical line-collision overlap that occurs in dense infill patterns
+    
+    
     if (ratio > 0.70 && ratio < 1.0) {
       eff -= 0.065 * (ratio - 0.70); 
     }
     
-    // 100% Solid Override
-    // At 100%, slicers abandon infill patterns and use solid rectilinear layers
+    
+    
     if (ratio >= 1.0) {
       eff = 1.0; 
     }
@@ -282,9 +282,9 @@ useEffect(() => {
     debugWeights.push(w.toFixed(1));
   }
   console.log(debugWeights.join('\n'));
-  // -----------------------------------------------------------------
+  
 
-  // 4. Active Render Calculation
+  
   const activeRatio = infillPercent / 100;
   let activeEfficiency = 0.86 + (0.13 * Math.pow(activeRatio, 0.4));
   
