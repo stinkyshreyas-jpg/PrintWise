@@ -122,7 +122,6 @@ const ElasticUploadPill: React.FC<ElasticUploadPillProps> = ({ onFileUpload, fil
         boxSizing: "border-box"
       }}
     >
-      {}
       <input
         ref={fileInputRef}
         type="file"
@@ -131,7 +130,6 @@ const ElasticUploadPill: React.FC<ElasticUploadPillProps> = ({ onFileUpload, fil
         style={{ display: "none" }}
       />
 
-      {}
       {fileName ? (
         <div style={{ display: "flex", alignItems: "center", gap: 10, width: "100%" }}>
           <span style={{
@@ -175,9 +173,6 @@ const ElasticUploadPill: React.FC<ElasticUploadPillProps> = ({ onFileUpload, fil
 };
 
 
-
-
-
 export default function App() {
   const [currentModel, setCurrentModel] = useState<any>(null);
   const [fileName, setFileName] = useState<string>(""); 
@@ -194,25 +189,18 @@ export default function App() {
   const [resetCounter, setResetCounter] = useState<number>(0);
   const fallbackColor = "#cbd5e1";
 
-  
-  
   const handleFileUpload = (e: any) => {
     const file = e.target.files?.[0];
     if (file) {
       setFileName(file.name);
 
-      
       if (currentModel?.objectUrl) {
         URL.revokeObjectURL(currentModel.objectUrl);
       }
 
-      
       const objectUrl = URL.createObjectURL(file);
-      
-      
       const ext = file.name.split('.').pop()?.toLowerCase() || 'stl';
 
-      
       setCurrentModel({
         objectUrl,
         format: ext,
@@ -220,6 +208,7 @@ export default function App() {
       });
     }
   };
+
   React.useEffect(() => {
     return () => {
       if (currentModel?.objectUrl) {
@@ -230,7 +219,6 @@ export default function App() {
 
   const triggerHomeView = () => setResetCounter((prev) => prev + 1);
 
-  
   const customAxesHelper = useMemo(() => {
     const group = new THREE.Group();
 
@@ -253,8 +241,7 @@ export default function App() {
     return group;
   }, []);
 
-  
-  const formatDim = (val: number) => useInches ? (val / 25.4).toFixed(2) + " in" : val.toFixed(1) + " mm";
+  const formatDim = (val: number) => useInches ? (val / 25.4).toFixed(2) + " in" : (val / 10).toFixed(1) + " cm";
   const formatVolume = (val: number) => useInches ? (val / 16387).toFixed(2) + " in³" : (val / 1000).toFixed(1) + " cm³";
   const formatWeight = (a: any) => a ? a.estimatedWeightGrams.toFixed(1) + " g" : "0 g";
   const formatCost = (a: any) => a ? "$" + a.estimatedMaterialCost.toFixed(2) : "$0.00";
@@ -262,11 +249,9 @@ export default function App() {
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#f8fafc", position: "relative", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', sans-serif" }}>
       
-      {}
       <div style={{ position: "absolute", top: "5%", left: "10%", width: "40vw", height: "40vw", background: "radial-gradient(circle, rgba(56, 189, 248, 0.12) 0%, rgba(255, 255, 255, 0) 70%)", pointerEvents: "none", filter: "blur(70px)" }} />
       <div style={{ position: "absolute", bottom: "5%", right: "10%", width: "45vw", height: "45vw", background: "radial-gradient(circle, rgba(168, 85, 247, 0.08) 0%, rgba(255, 255, 255, 0) 70%)", pointerEvents: "none", filter: "blur(90px)" }} />
 
-      {}
       <Canvas
         shadows
         camera={{ position: [12, -12, 12], fov: 45 }}
@@ -279,14 +264,12 @@ export default function App() {
         <directionalLight position={[10, -10, 15]} intensity={1.5} castShadow />
         <pointLight position={[-5, 5, 5]} intensity={0.4} />
 
-        {}
         <gridHelper
           args={[30, 30]}
           position={[0, 0, -0.01]}
           rotation={[Math.PI / 2, 0, 0]}
         />
 
-        {}
         <primitive object={customAxesHelper} />
 
         <Suspense fallback={null}>
@@ -311,13 +294,11 @@ export default function App() {
         <CameraResetController resetTrigger={resetCounter} />
       </Canvas>
 
-      {}
       <div style={{ 
         position: "absolute", top: 20, left: 20, display: "flex", flexDirection: "column", gap: 14, zIndex: 10, width: "320px", 
         maxHeight: "calc(100vh - 40px)", overflowY: "auto", paddingRight: 4 
       }}>
         
-        {}
         <div style={{
           background: "rgba(15, 23, 42, 0.95)",
           backdropFilter: "blur(20px)",
@@ -335,7 +316,6 @@ export default function App() {
           </span>
         </div>
 
-        {}
         <div style={{
           background: "rgba(255, 255, 255, 0.6)",
           backdropFilter: "blur(25px) saturate(180%)",
@@ -350,7 +330,6 @@ export default function App() {
             Workspace Options
           </span>
           
-          {}
           <ElasticUploadPill
             onFileUpload={handleFileUpload}
             fileName={fileName}
@@ -377,7 +356,6 @@ export default function App() {
           </label>
         </div>
 
-        {}
         <div style={{
           background: "rgba(255, 255, 255, 0.6)",
           backdropFilter: "blur(25px) saturate(180%)",
@@ -465,7 +443,6 @@ export default function App() {
           </div>
         </div>
 
-        {}
         <div style={{
           background: "rgba(255, 255, 255, 0.65)",
           backdropFilter: "blur(30px) saturate(200%)",
@@ -487,14 +464,13 @@ export default function App() {
                 padding: "4px 10px", borderRadius: 10, cursor: "pointer", fontSize: "11px", fontWeight: 700
               }}
             >
-              Unit: {useInches ? "IN" : "MM"}
+              Unit: {useInches ? "IN" : "CM"}
             </button>
           </div>
 
           {analysis ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: "13px" }}>
               
-              {}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4, background: "rgba(255, 255, 255, 0.5)", padding: "10px 6px", borderRadius: 14, border: "1px solid rgba(255, 255, 255, 0.7)" }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                   <span style={{ fontSize: "10px", color: "#94a3b8", fontWeight: 700 }}>X (WIDTH)</span>
@@ -510,7 +486,6 @@ export default function App() {
                 </div>
               </div>
 
-              {}
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ color: "#64748b", fontWeight: 500 }}>Volume:</span>
@@ -532,7 +507,6 @@ export default function App() {
 
               <hr style={{ border: "none", borderTop: "1px solid rgba(226, 232, 240, 0.8)", margin: "2px 0" }} />
 
-              {}
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <span style={{ fontSize: "11px", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px" }}>
                   Overhang Specs
@@ -590,7 +564,6 @@ export default function App() {
 
               <hr style={{ border: "none", borderTop: "1px solid rgba(226, 232, 240, 0.8)", margin: "2px 0" }} />
 
-              {}
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
