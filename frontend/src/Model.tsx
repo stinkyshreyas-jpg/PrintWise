@@ -9,7 +9,7 @@ interface ModelProps {
   wireframe: boolean;
   fallbackColor: string;
   infillPercent?: number;
-  nozzleDiameter?: number; // hardware fact -- can't be auto-recommended, still an input
+  nozzleDiameter?: number; 
   spoolPrice?: number;
   spoolWeightGrams?: number;
   filamentDensity?: number;
@@ -38,9 +38,9 @@ interface ModelProps {
   }) => void;
 }
 
-// area: triangle area (mm²)
-// localThickness: raycast distance to the opposite surface, in mm (null if
-// the ray found nothing -- open mesh / edge case, don't clamp in that case)
+
+
+
 interface ThicknessSample {
   area: number;
   localThickness: number | null;
@@ -61,12 +61,12 @@ interface GeometryRawData {
   bottomCapSamples: ThicknessSample[];
 }
 
-// Simple, transparent heuristics -- a reasonable starting point, not a
-// physics-validated optimum. Bigger/simpler parts get coarser layers (faster
-// prints where fine detail doesn't matter); top/bottom layer counts are
-// picked to hit a real-world target solid thickness regardless of layer
-// height, since that's what actually determines whether infill gaps get
-// bridged over cleanly.
+
+
+
+
+
+
 function computeRecommendedSettings(maxDimMm: number, supportSurfacePercent: number, nozzleDiameterMm: number) {
   let layerHeightMm: number;
   if (maxDimMm < 40) layerHeightMm = 0.12;
@@ -74,27 +74,27 @@ function computeRecommendedSettings(maxDimMm: number, supportSurfacePercent: num
   else if (maxDimMm < 250) layerHeightMm = 0.2;
   else layerHeightMm = 0.24;
 
-  // More overhang/support-heavy parts benefit from finer resolution on
-  // bridged/angled surfaces.
+  
+  
   if (supportSurfacePercent > 15 && layerHeightMm > 0.12) {
     layerHeightMm -= 0.04;
   }
 
-  // Layer height is physically constrained by nozzle diameter: too fine and
-  // the nozzle can't extrude a consistent bead, too coarse and layers won't
-  // bond properly. ~25%-80% of nozzle diameter is the commonly usable range
-  // (e.g. a 0.2mm nozzle tops out well before a 0.24mm layer is viable).
+  
+  
+  
+  
   const minLayerHeightMm = Math.max(0.08, nozzleDiameterMm * 0.25);
   const maxLayerHeightMm = nozzleDiameterMm * 0.8;
   layerHeightMm = Math.min(maxLayerHeightMm, Math.max(minLayerHeightMm, layerHeightMm));
   layerHeightMm = Math.round(layerHeightMm * 100) / 100;
 
-  // Wall loops: default 3; bump to 4 for larger parts, more likely to be
-  // functional/load-bearing rather than purely decorative.
+  
+  
   const perimeters = maxDimMm > 100 ? 4 : 3;
 
   const TARGET_TOP_THICKNESS_MM = 0.8;
-  const TARGET_BOTTOM_THICKNESS_MM = 0.6; // slightly less; first-layer squish adds effective thickness
+  const TARGET_BOTTOM_THICKNESS_MM = 0.6; 
   const topSolidLayers = Math.max(2, Math.ceil(TARGET_TOP_THICKNESS_MM / layerHeightMm));
   const bottomSolidLayers = Math.max(2, Math.ceil(TARGET_BOTTOM_THICKNESS_MM / layerHeightMm));
 
@@ -120,7 +120,7 @@ export default function Model({
   const [rawData, setRawData] = useState<GeometryRawData | null>(null);
   const [holeEdgeGeometry, setHoleEdgeGeometry] = useState<THREE.BufferGeometry | null>(null);
 
-  // 1. Process Geometry: Center XY, and ground lowest vertex to Z = 0
+  
   const displayGeometry = useMemo(() => {
     if (!rawLoadedGeometry) return null;
     const geom = rawLoadedGeometry.clone();
@@ -137,7 +137,7 @@ export default function Model({
     return geom;
   }, [rawLoadedGeometry]);
 
-  // 2. Surface & Volume Extraction + local-thickness sampling
+  
   useEffect(() => {
     if (!displayGeometry) return;
 
@@ -171,17 +171,17 @@ export default function Model({
     const defaultColor = new THREE.Color(fallbackColor);
     const riskyColor = new THREE.Color("#ff3333");
 
-    // Raycast from each sampled triangle's centroid, inward (opposite its
-    // normal), to measure the real local material thickness at that point.
-    // This is what lets thin/curved features (Benchy's hull) and chunky
-    // features (a thick bracket) each get physically appropriate shell
-    // thickness, instead of one global constant applied everywhere.
+    
+    
+    
+    
+    
     const raycaster = new THREE.Raycaster();
     const rayMesh = new THREE.Mesh(displayGeometry, new THREE.MeshBasicMaterial());
-    const EPS = 0.01; // mm, nudge past the origin triangle to avoid self-hits
+    const EPS = 0.01; 
 
-    // Sample a stride of triangles rather than all of them -- brute-force
-    // raycasting (no acceleration structure) is O(triangles) per ray.
+    
+    
     const desiredSamples = 2000;
     const stride = Math.max(1, Math.floor(totalTriangles / desiredSamples));
 
@@ -308,10 +308,10 @@ export default function Model({
     });
   }, [displayGeometry, fallbackColor]);
 
-  // 2b. Hole Detection: in a watertight mesh, every edge is shared by
-  // exactly two triangles. An edge belonging to only one triangle is a
-  // "boundary edge" -- a gap in the surface. The slicer has to guess how to
-  // patch these, which can silently drop walls or fail to slice.
+  
+  
+  
+  
   useEffect(() => {
     if (!displayGeometry) return;
 
@@ -323,11 +323,11 @@ export default function Model({
     }
 
     const vertexCount = pos.count;
-    const PRECISION = 1000; // round to 0.001mm to merge coincident vertices
+    const PRECISION = 1000; 
     const round = (v: number) => Math.round(v * PRECISION) / PRECISION;
     const keyFor = (x: number, y: number, z: number) => `${round(x)}_${round(y)}_${round(z)}`;
 
-    // edgeKey -> { count, endpoints }
+    
     const edgeMap = new Map<string, { count: number; a: [number, number, number]; b: [number, number, number] }>();
 
     const v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
@@ -407,11 +407,11 @@ export default function Model({
     const topCapThicknessMm = topSolidLayers * layerHeightMm;
     const bottomCapThicknessMm = bottomSolidLayers * layerHeightMm;
 
-    // For each sample, effective thickness can't exceed half the distance to
-    // the opposite surface -- this is what prevents thin features (a
-    // Benchy hull, a fin) from having their material counted from both
-    // sides. Then scale the sampled shell volume up to the full measured
-    // area for that category.
+    
+    
+    
+    
+    
     const accumulateShell = (
       samples: ThicknessSample[],
       configuredThicknessMm: number,
@@ -432,7 +432,7 @@ export default function Model({
       return sampledShell * (measuredAreaMm2 / sampledArea);
     };
 
-    // Cap area split proportionally between top/bottom samples for scaling
+    
     const topCapMeasuredArea =
       topCapSamples.length + bottomCapSamples.length > 0
         ? capSurfaceAreaMm2 * (topCapSamples.length / (topCapSamples.length + bottomCapSamples.length))
@@ -445,14 +445,14 @@ export default function Model({
 
     let shellVolumeMm3 = wallShellVolumeMm3 + topCapShellVolumeMm3 + bottomCapShellVolumeMm3;
 
-    // Safety fallback only: shell physically cannot exceed the model's own volume
+    
     if (shellVolumeMm3 > totalVolumeMm3) {
       shellVolumeMm3 = totalVolumeMm3;
     }
 
     const coreVolumeMm3 = Math.max(0, totalVolumeMm3 - shellVolumeMm3);
 
-    // Plain linear infill scaling -- no fitted exponent/floor/correction constant.
+    
     const infillRatio = infillPercent / 100;
     const printedPlasticVolumeMm3 = shellVolumeMm3 + coreVolumeMm3 * infillRatio;
 
