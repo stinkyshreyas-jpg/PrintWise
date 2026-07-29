@@ -122,6 +122,7 @@ const ElasticUploadPill: React.FC<ElasticUploadPillProps> = ({ onFileUpload, fil
         boxSizing: "border-box"
       }}
     >
+      {}
       <input
         ref={fileInputRef}
         type="file"
@@ -130,6 +131,7 @@ const ElasticUploadPill: React.FC<ElasticUploadPillProps> = ({ onFileUpload, fil
         style={{ display: "none" }}
       />
 
+      {}
       {fileName ? (
         <div style={{ display: "flex", alignItems: "center", gap: 10, width: "100%" }}>
           <span style={{
@@ -173,6 +175,9 @@ const ElasticUploadPill: React.FC<ElasticUploadPillProps> = ({ onFileUpload, fil
 };
 
 
+
+
+
 export default function App() {
   const [currentModel, setCurrentModel] = useState<any>(null);
   const [fileName, setFileName] = useState<string>(""); 
@@ -180,27 +185,32 @@ export default function App() {
   const [useInches, setUseInches] = useState<boolean>(false);
   const [infill, setInfill] = useState<number>(20);
   const [spoolPrice, setSpoolPrice] = useState<number>(25);
-  const [perimeters, setPerimeters] = useState<number>(3);
   const [nozzleDiameter, setNozzleDiameter] = useState<number>(0.4);
-  const [layerHeight, setLayerHeight] = useState<number>(0.2);
-  const [topSolidLayers, setTopSolidLayers] = useState<number>(4);
-  const [bottomSolidLayers, setBottomSolidLayers] = useState<number>(4);
   const [analysis, setAnalysis] = useState<any>(null);
   const [resetCounter, setResetCounter] = useState<number>(0);
+  const [showHoles, setShowHoles] = useState<boolean>(false);
+  const [holeAnalysis, setHoleAnalysis] = useState<{ hasHoles: boolean; openEdgeCount: number } | null>(null);
   const fallbackColor = "#cbd5e1";
 
+  
+  
   const handleFileUpload = (e: any) => {
     const file = e.target.files?.[0];
     if (file) {
       setFileName(file.name);
 
+      
       if (currentModel?.objectUrl) {
         URL.revokeObjectURL(currentModel.objectUrl);
       }
 
+      
       const objectUrl = URL.createObjectURL(file);
+      
+      
       const ext = file.name.split('.').pop()?.toLowerCase() || 'stl';
 
+      
       setCurrentModel({
         objectUrl,
         format: ext,
@@ -208,7 +218,6 @@ export default function App() {
       });
     }
   };
-
   React.useEffect(() => {
     return () => {
       if (currentModel?.objectUrl) {
@@ -219,6 +228,7 @@ export default function App() {
 
   const triggerHomeView = () => setResetCounter((prev) => prev + 1);
 
+  
   const customAxesHelper = useMemo(() => {
     const group = new THREE.Group();
 
@@ -241,17 +251,32 @@ export default function App() {
     return group;
   }, []);
 
-  const formatDim = (val: number) => useInches ? (val / 25.4).toFixed(2) + " in" : (val / 10).toFixed(1) + " cm";
+  
+  const formatDim = (val: number) => useInches ? (val / 25.4).toFixed(2) + " in" : val.toFixed(1) + " mm";
   const formatVolume = (val: number) => useInches ? (val / 16387).toFixed(2) + " in³" : (val / 1000).toFixed(1) + " cm³";
+
+  // FIX: previously these recomputed weight/cost from scratch using a naive
+  // (volume * density * infillRatio) formula, which ignores shell/wall/cap
+  // thickness entirely and scales the ENTIRE model — including the solid
+  // shell, which doesn't change with infill — down by the infill ratio.
+  // That's what caused the oversized swings vs Bambu Studio when changing
+  // infill, and why editing Model.tsx's calc appeared to do nothing: this
+  // formula never used Model.tsx's output in the first place.
+  //
+  // Model.tsx already computes the correct shell+infill-aware weight and
+  // cost in `analysis.estimatedWeightGrams` / `analysis.estimatedMaterialCost`
+  // — just read those directly instead of recalculating.
   const formatWeight = (a: any) => a ? a.estimatedWeightGrams.toFixed(1) + " g" : "0 g";
   const formatCost = (a: any) => a ? "$" + a.estimatedMaterialCost.toFixed(2) : "$0.00";
 
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#f8fafc", position: "relative", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', sans-serif" }}>
       
+      {}
       <div style={{ position: "absolute", top: "5%", left: "10%", width: "40vw", height: "40vw", background: "radial-gradient(circle, rgba(56, 189, 248, 0.12) 0%, rgba(255, 255, 255, 0) 70%)", pointerEvents: "none", filter: "blur(70px)" }} />
       <div style={{ position: "absolute", bottom: "5%", right: "10%", width: "45vw", height: "45vw", background: "radial-gradient(circle, rgba(168, 85, 247, 0.08) 0%, rgba(255, 255, 255, 0) 70%)", pointerEvents: "none", filter: "blur(90px)" }} />
 
+      {}
       <Canvas
         shadows
         camera={{ position: [12, -12, 12], fov: 45 }}
@@ -264,12 +289,14 @@ export default function App() {
         <directionalLight position={[10, -10, 15]} intensity={1.5} castShadow />
         <pointLight position={[-5, 5, 5]} intensity={0.4} />
 
+        {}
         <gridHelper
           args={[30, 30]}
           position={[0, 0, -0.01]}
           rotation={[Math.PI / 2, 0, 0]}
         />
 
+        {}
         <primitive object={customAxesHelper} />
 
         <Suspense fallback={null}>
@@ -280,11 +307,9 @@ export default function App() {
               fallbackColor={fallbackColor}
               infillPercent={infill}
               spoolPrice={spoolPrice}
-              perimeters={perimeters}
               nozzleDiameter={nozzleDiameter}
-              layerHeight={layerHeight}
-              topSolidLayers={topSolidLayers}
-              bottomSolidLayers={bottomSolidLayers}
+              showHoles={showHoles}
+              onHolesDetected={setHoleAnalysis}
               onModelAnalyzed={setAnalysis}
             />
           )}
@@ -294,11 +319,64 @@ export default function App() {
         <CameraResetController resetTrigger={resetCounter} />
       </Canvas>
 
+      {}
+      {currentModel && (
+        <div style={{ position: "absolute", top: 20, right: 20, zIndex: 10, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+          <button
+            onClick={() => setShowHoles(!showHoles)}
+            style={{
+              background: showHoles ? "rgba(239, 68, 68, 0.95)" : "rgba(15, 23, 42, 0.9)",
+              color: "#ffffff",
+              border: "none",
+              padding: "10px 16px",
+              borderRadius: 14,
+              cursor: "pointer",
+              fontWeight: 700,
+              fontSize: "12px",
+              boxShadow: "0 10px 25px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)",
+              backdropFilter: "blur(20px)",
+              WebkitBackdropFilter: "blur(20px)",
+              transition: "all 0.2s ease",
+              display: "flex",
+              alignItems: "center",
+              gap: 8
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            {showHoles ? "Hide Hole Check" : "Check for Holes"}
+          </button>
+
+          {holeAnalysis && (
+            <div style={{
+              background: holeAnalysis.hasHoles ? "rgba(239, 68, 68, 0.12)" : "rgba(16, 185, 129, 0.12)",
+              color: holeAnalysis.hasHoles ? "#dc2626" : "#059669",
+              border: holeAnalysis.hasHoles ? "1px solid rgba(239, 68, 68, 0.3)" : "1px solid rgba(16, 185, 129, 0.3)",
+              padding: "6px 12px",
+              borderRadius: 10,
+              fontSize: "11px",
+              fontWeight: 700,
+              backdropFilter: "blur(20px)",
+              WebkitBackdropFilter: "blur(20px)",
+            }}>
+              {holeAnalysis.hasHoles
+                ? `⚠ ${holeAnalysis.openEdgeCount} open edge${holeAnalysis.openEdgeCount === 1 ? "" : "s"} found`
+                : "✓ Watertight, no holes"}
+            </div>
+          )}
+        </div>
+      )}
+
+      {}
       <div style={{ 
         position: "absolute", top: 20, left: 20, display: "flex", flexDirection: "column", gap: 14, zIndex: 10, width: "320px", 
         maxHeight: "calc(100vh - 40px)", overflowY: "auto", paddingRight: 4 
       }}>
         
+        {}
         <div style={{
           background: "rgba(15, 23, 42, 0.95)",
           backdropFilter: "blur(20px)",
@@ -316,6 +394,7 @@ export default function App() {
           </span>
         </div>
 
+        {}
         <div style={{
           background: "rgba(255, 255, 255, 0.6)",
           backdropFilter: "blur(25px) saturate(180%)",
@@ -330,6 +409,7 @@ export default function App() {
             Workspace Options
           </span>
           
+          {}
           <ElasticUploadPill
             onFileUpload={handleFileUpload}
             fileName={fileName}
@@ -356,93 +436,7 @@ export default function App() {
           </label>
         </div>
 
-        <div style={{
-          background: "rgba(255, 255, 255, 0.6)",
-          backdropFilter: "blur(25px) saturate(180%)",
-          WebkitBackdropFilter: "blur(25px) saturate(180%)",
-          padding: "18px",
-          borderRadius: 20,
-          border: "1px solid rgba(255, 255, 255, 0.8)",
-          boxShadow: "0 12px 30px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,0.9)",
-          display: "flex", flexDirection: "column", gap: 12
-        }}>
-          <span style={{ fontSize: "13px", fontWeight: 700, color: "#0f172a", letterSpacing: "-0.2px" }}>
-            Print Profile
-          </span>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 500 }}>Nozzle Diameter</span>
-            <div style={{ display: "flex", gap: 6 }}>
-              {[0.2, 0.4, 0.6, 0.8].map((size) => (
-                <button
-                  key={size}
-                  onClick={() => setNozzleDiameter(size)}
-                  style={{
-                    flex: 1,
-                    padding: "6px 0",
-                    borderRadius: 10,
-                    border: nozzleDiameter === size ? "1px solid rgba(15, 23, 42, 0.9)" : "1px solid rgba(15, 23, 42, 0.12)",
-                    background: nozzleDiameter === size ? "rgba(15, 23, 42, 0.9)" : "rgba(255, 255, 255, 0.5)",
-                    color: nozzleDiameter === size ? "#ffffff" : "#0f172a",
-                    fontSize: "11px", fontWeight: 700, cursor: "pointer", transition: "all 0.15s ease"
-                  }}
-                >
-                  {size}mm
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
-              <span style={{ color: "#64748b", fontWeight: 500 }}>Layer Height:</span>
-              <span style={{ fontWeight: 700, color: "#0f172a" }}>{layerHeight.toFixed(2)} mm</span>
-            </div>
-            <input
-              type="range" min="0.08" max="0.28" step="0.04" value={layerHeight}
-              onChange={(e) => setLayerHeight(Number(e.target.value))}
-              style={{ width: "100%", accentColor: "#0f172a", cursor: "pointer" }}
-            />
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
-              <span style={{ color: "#64748b", fontWeight: 500 }}>Wall Loops (Perimeters):</span>
-              <span style={{ fontWeight: 700, color: "#0f172a" }}>{perimeters}</span>
-            </div>
-            <input
-              type="range" min="1" max="8" step="1" value={perimeters}
-              onChange={(e) => setPerimeters(Number(e.target.value))}
-              style={{ width: "100%", accentColor: "#0f172a", cursor: "pointer" }}
-            />
-          </div>
-
-          <div style={{ display: "flex", gap: 10 }}>
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
-                <span style={{ color: "#64748b", fontWeight: 500 }}>Top Layers:</span>
-                <span style={{ fontWeight: 700, color: "#0f172a" }}>{topSolidLayers}</span>
-              </div>
-              <input
-                type="range" min="0" max="10" step="1" value={topSolidLayers}
-                onChange={(e) => setTopSolidLayers(Number(e.target.value))}
-                style={{ width: "100%", accentColor: "#0f172a", cursor: "pointer" }}
-              />
-            </div>
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
-                <span style={{ color: "#64748b", fontWeight: 500 }}>Bottom Layers:</span>
-                <span style={{ fontWeight: 700, color: "#0f172a" }}>{bottomSolidLayers}</span>
-              </div>
-              <input
-                type="range" min="0" max="10" step="1" value={bottomSolidLayers}
-                onChange={(e) => setBottomSolidLayers(Number(e.target.value))}
-                style={{ width: "100%", accentColor: "#0f172a", cursor: "pointer" }}
-              />
-            </div>
-          </div>
-        </div>
-
+        {}
         <div style={{
           background: "rgba(255, 255, 255, 0.65)",
           backdropFilter: "blur(30px) saturate(200%)",
@@ -464,13 +458,36 @@ export default function App() {
                 padding: "4px 10px", borderRadius: 10, cursor: "pointer", fontSize: "11px", fontWeight: 700
               }}
             >
-              Unit: {useInches ? "IN" : "CM"}
+              Unit: {useInches ? "IN" : "MM"}
             </button>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: "12px", color: "#64748b", fontWeight: 500 }}>Nozzle Diameter:</span>
+            <div style={{ display: "flex", gap: 4 }}>
+              {[0.2, 0.4, 0.6, 0.8].map((size) => (
+                <button
+                  key={size}
+                  onClick={() => setNozzleDiameter(size)}
+                  style={{
+                    padding: "4px 8px",
+                    borderRadius: 8,
+                    border: nozzleDiameter === size ? "1px solid rgba(15, 23, 42, 0.9)" : "1px solid rgba(15, 23, 42, 0.12)",
+                    background: nozzleDiameter === size ? "rgba(15, 23, 42, 0.9)" : "rgba(255, 255, 255, 0.5)",
+                    color: nozzleDiameter === size ? "#ffffff" : "#0f172a",
+                    fontSize: "10px", fontWeight: 700, cursor: "pointer", transition: "all 0.15s ease"
+                  }}
+                >
+                  {size}
+                </button>
+              ))}
+            </div>
           </div>
 
           {analysis ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: "13px" }}>
               
+              {}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4, background: "rgba(255, 255, 255, 0.5)", padding: "10px 6px", borderRadius: 14, border: "1px solid rgba(255, 255, 255, 0.7)" }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                   <span style={{ fontSize: "10px", color: "#94a3b8", fontWeight: 700 }}>X (WIDTH)</span>
@@ -486,6 +503,7 @@ export default function App() {
                 </div>
               </div>
 
+              {}
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ color: "#64748b", fontWeight: 500 }}>Volume:</span>
@@ -507,6 +525,28 @@ export default function App() {
 
               <hr style={{ border: "none", borderTop: "1px solid rgba(226, 232, 240, 0.8)", margin: "2px 0" }} />
 
+              {}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={{ fontSize: "11px", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px" }}>
+                  Recommended Print Settings
+                </span>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#64748b", fontWeight: 500 }}>Wall Loops:</span>
+                  <span style={{ fontWeight: 700, color: "#0f172a" }}>{analysis.recommendedPerimeters}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#64748b", fontWeight: 500 }}>Top / Bottom Layers:</span>
+                  <span style={{ fontWeight: 700, color: "#0f172a" }}>{analysis.recommendedTopSolidLayers} / {analysis.recommendedBottomSolidLayers}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "#64748b", fontWeight: 500 }}>Layer Height:</span>
+                  <span style={{ fontWeight: 700, color: "#0f172a" }}>{analysis.recommendedLayerHeightMm.toFixed(2)} mm</span>
+                </div>
+              </div>
+
+              <hr style={{ border: "none", borderTop: "1px solid rgba(226, 232, 240, 0.8)", margin: "2px 0" }} />
+
+              {}
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <span style={{ fontSize: "11px", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px" }}>
                   Overhang Specs
@@ -564,6 +604,7 @@ export default function App() {
 
               <hr style={{ border: "none", borderTop: "1px solid rgba(226, 232, 240, 0.8)", margin: "2px 0" }} />
 
+              {}
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
