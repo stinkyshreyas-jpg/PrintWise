@@ -3,3 +3,4 @@ export interface LoadedModel {
   objectUrl: string;
   mtlObjectUrl?: string;
 }
+

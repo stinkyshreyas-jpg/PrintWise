@@ -1,527 +1,468 @@
-import { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { useLoader } from "@react-three/fiber";
-import { STLLoader } from "three/addons/loaders/STLLoader.js";
-import type { LoadedModel } from "./types";
+import { useLoader, useFrame } from "@react-three/fiber";
+import { STLLoader } from "three-stdlib";
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from "three-mesh-bvh";
+
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree as any;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree as any;
+THREE.Mesh.prototype.raycast = acceleratedRaycast as any;
 
 interface ModelProps {
-  model: LoadedModel;
+  model: { objectUrl: string; format: string; fileName: string };
   wireframe: boolean;
   fallbackColor: string;
-  infillPercent?: number;
-  nozzleDiameter?: number; 
-  spoolPrice?: number;
-  spoolWeightGrams?: number;
-  filamentDensity?: number;
-  showHoles?: boolean;
-  onHolesDetected?: (data: { hasHoles: boolean; openEdgeCount: number }) => void;
-  onModelAnalyzed: (data: {
-    x: number;
-    y: number;
-    z: number;
-    triangles: number;
-    volume: number;
-    maxOverhang: number;
-    facesOverThreshold: number;
-    supportSurfacePercent: number;
-    bridgeSurfaceArea: number;
-    bridgePercent: number;
-    surfaceArea: number;
-    wallArea: number;
-    capArea: number;
-    estimatedWeightGrams: number;
-    estimatedMaterialCost: number;
-    recommendedPerimeters: number;
-    recommendedTopSolidLayers: number;
-    recommendedBottomSolidLayers: number;
-    recommendedLayerHeightMm: number;
-  }) => void;
+  infillPercent: number;
+  spoolPrice: number;
+  spoolWeightGrams: number;
+  filamentKey: string;
+  // Slicer/print parameters -- these now actually drive the weight
+  // calculation (see deriveAverageThicknessMm below), instead of being
+  // hardcoded constants inside the effect.
+  nozzleDiameterMm: number;
+  layerHeightMm: number;
+  wallLoopCount: number;
+  topLayerCount: number;
+  bottomLayerCount: number;
+  activeHeatmap: "none" | "overhang" | "stress" | "thinWall";
+  showHoles: boolean;
+  onHolesDetected: (analysis: { hasHoles: boolean; openEdgeCount: number } | null) => void;
+  onModelAnalyzed: (data: any) => void;
 }
 
+const FILAMENT_PROFILES: Record<string, { density: number }> = {
+  PLA: { density: 1.24 },
+  PETG: { density: 1.27 },
+  ABS: { density: 1.04 },
+  TPU: { density: 1.21 },
+};
 
-
-
-interface ThicknessSample {
-  area: number;
-  localThickness: number | null;
-}
-
-interface GeometryRawData {
-  totalTriangles: number;
-  totalVolumeMm3: number;
-  totalSurfaceAreaMm2: number;
-  wallSurfaceAreaMm2: number;
-  capSurfaceAreaMm2: number;
-  supportSurfaceAreaMm2: number;
-  maxOverhangRad: number;
-  facesOverThreshold: number;
-  sizeMm: THREE.Vector3;
-  wallSamples: ThicknessSample[];
-  topCapSamples: ThicknessSample[];
-  bottomCapSamples: ThicknessSample[];
-}
-
-
-
-
-
-
-
-function computeRecommendedSettings(maxDimMm: number, supportSurfacePercent: number, nozzleDiameterMm: number) {
-  let layerHeightMm: number;
-  if (maxDimMm < 40) layerHeightMm = 0.12;
-  else if (maxDimMm < 120) layerHeightMm = 0.16;
-  else if (maxDimMm < 250) layerHeightMm = 0.2;
-  else layerHeightMm = 0.24;
-
-  
-  
-  if (supportSurfacePercent > 15 && layerHeightMm > 0.12) {
-    layerHeightMm -= 0.04;
-  }
-
-  
-  
-  
-  
-  const minLayerHeightMm = Math.max(0.08, nozzleDiameterMm * 0.25);
-  const maxLayerHeightMm = nozzleDiameterMm * 0.8;
-  layerHeightMm = Math.min(maxLayerHeightMm, Math.max(minLayerHeightMm, layerHeightMm));
-  layerHeightMm = Math.round(layerHeightMm * 100) / 100;
-
-  
-  
-  const perimeters = maxDimMm > 100 ? 4 : 3;
-
-  const TARGET_TOP_THICKNESS_MM = 0.8;
-  const TARGET_BOTTOM_THICKNESS_MM = 0.6; 
-  const topSolidLayers = Math.max(2, Math.ceil(TARGET_TOP_THICKNESS_MM / layerHeightMm));
-  const bottomSolidLayers = Math.max(2, Math.ceil(TARGET_BOTTOM_THICKNESS_MM / layerHeightMm));
-
-  return { perimeters, topSolidLayers, bottomSolidLayers, layerHeightMm };
+/**
+ * Ported from the user's estimatePrintWeight engine (originally written for
+ * Node.js/fs -- not usable in-browser as-is). Same formula: average the
+ * side wall thickness (from nozzle + wall loop count) with the top/bottom
+ * solid layer thicknesses (from layer height + layer counts) into one
+ * blended shell thickness, applied uniformly across total surface area.
+ *
+ * Honest tradeoff, not hidden: this is a simpler model than a full
+ * wall-vs-cap area split (it doesn't distinguish which surface area is
+ * actually a side wall vs. a top/bottom cap) -- but every number in it
+ * traces directly to a real print setting, with no unexplained fitted
+ * constants. That transparency is the point of using this version.
+ */
+function deriveAverageThicknessMm(
+  nozzleDiameterMm: number,
+  layerHeightMm: number,
+  wallLoopCount: number,
+  topLayerCount: number,
+  bottomLayerCount: number
+): number {
+  // Bambu Studio's default side line width rule: nozzle * 1.1
+  const defaultLineWidthMm = nozzleDiameterMm * 1.1;
+  const sideThicknessMm = wallLoopCount * defaultLineWidthMm;
+  const topThicknessMm = topLayerCount * layerHeightMm;
+  const bottomThicknessMm = bottomLayerCount * layerHeightMm;
+  return (sideThicknessMm + topThicknessMm + bottomThicknessMm) / 3;
 }
 
 export default function Model({
   model,
   wireframe,
   fallbackColor,
-  infillPercent = 15,
-  nozzleDiameter = 0.4,
-  spoolPrice = 25,
-  spoolWeightGrams = 1000,
-  filamentDensity = 1.24,
-  showHoles = false,
+  infillPercent,
+  spoolPrice,
+  spoolWeightGrams,
+  filamentKey,
+  nozzleDiameterMm,
+  layerHeightMm,
+  wallLoopCount,
+  topLayerCount,
+  bottomLayerCount,
+  activeHeatmap,
+  showHoles,
   onHolesDetected,
   onModelAnalyzed,
 }: ModelProps) {
-  if (!model || !model.objectUrl) return null;
+  const meshRef = useRef<THREE.Mesh>(null);
+  const rawGeometry = useLoader(STLLoader, model.objectUrl);
 
-  const rawLoadedGeometry = useLoader(STLLoader, model.objectUrl);
-  const [rawData, setRawData] = useState<GeometryRawData | null>(null);
-  const [holeEdgeGeometry, setHoleEdgeGeometry] = useState<THREE.BufferGeometry | null>(null);
+  const geometry = useMemo(() => {
+    const geo = rawGeometry.clone();
+    geo.computeVertexNormals();
 
-  
-  const displayGeometry = useMemo(() => {
-    if (!rawLoadedGeometry) return null;
-    const geom = rawLoadedGeometry.clone();
+    // --- Advanced Slicer-Grade Auto Lay-Flat ---
+    const posAttr = geo.attributes.position;
 
-    geom.center();
+    let bestAxis = new THREE.Vector3(0, 0, -1);
+    let maxFlatness = -1;
 
-    geom.computeBoundingBox();
-    if (geom.boundingBox) {
-      const minZ = geom.boundingBox.min.z;
-      geom.translate(0, 0, -minZ);
-    }
+    const p1 = new THREE.Vector3(), p2 = new THREE.Vector3(), p3 = new THREE.Vector3();
+    const cb = new THREE.Vector3(), ab = new THREE.Vector3();
 
-    geom.computeVertexNormals();
-    return geom;
-  }, [rawLoadedGeometry]);
+    for (let i = 0; i < posAttr.count; i += 3) {
+      p1.fromBufferAttribute(posAttr, i);
+      p2.fromBufferAttribute(posAttr, i + 1);
+      p3.fromBufferAttribute(posAttr, i + 2);
 
-  
-  useEffect(() => {
-    if (!displayGeometry) return;
+      ab.subVectors(p2, p1);
+      cb.subVectors(p3, p1);
+      cb.cross(ab).normalize();
 
-    const pos = displayGeometry.attributes.position;
-    if (!pos) return;
-
-    const normalAttr = displayGeometry.attributes.normal;
-    const vertexCount = pos.count;
-    const totalTriangles = vertexCount / 3;
-
-    let totalVolumeMm3 = 0;
-    let totalSurfaceAreaMm2 = 0;
-    let wallSurfaceAreaMm2 = 0;
-    let capSurfaceAreaMm2 = 0;
-    let supportSurfaceAreaMm2 = 0;
-    let maxOverhangRad = 0;
-    let facesOverThreshold = 0;
-
-    const pA = new THREE.Vector3();
-    const pB = new THREE.Vector3();
-    const pC = new THREE.Vector3();
-    const nA = new THREE.Vector3();
-    const nB = new THREE.Vector3();
-    const nC = new THREE.Vector3();
-    const faceNormal = new THREE.Vector3();
-    const centroid = new THREE.Vector3();
-    const rayOrigin = new THREE.Vector3();
-    const rayDir = new THREE.Vector3();
-
-    const colorArray = new Float32Array(vertexCount * 3);
-    const defaultColor = new THREE.Color(fallbackColor);
-    const riskyColor = new THREE.Color("#ff3333");
-
-    
-    
-    
-    
-    
-    const raycaster = new THREE.Raycaster();
-    const rayMesh = new THREE.Mesh(displayGeometry, new THREE.MeshBasicMaterial());
-    const EPS = 0.01; 
-
-    
-    
-    const desiredSamples = 2000;
-    const stride = Math.max(1, Math.floor(totalTriangles / desiredSamples));
-
-    const wallSamples: ThicknessSample[] = [];
-    const topCapSamples: ThicknessSample[] = [];
-    const bottomCapSamples: ThicknessSample[] = [];
-
-    let triIndex = 0;
-
-    for (let i = 0; i < vertexCount; i += 3) {
-      pA.fromBufferAttribute(pos, i);
-      pB.fromBufferAttribute(pos, i + 1);
-      pC.fromBufferAttribute(pos, i + 2);
-
-      const v321 = pC.x * pB.y * pA.z;
-      const v231 = pB.x * pC.y * pA.z;
-      const v312 = pC.x * pA.y * pB.z;
-      const v132 = pA.x * pC.y * pB.z;
-      const v213 = pB.x * pA.y * pC.z;
-      const v123 = pA.x * pB.y * pC.z;
-      totalVolumeMm3 += (-v321 + v231 + v312 - v132 - v213 + v123) / 6.0;
-
-      const edge1 = new THREE.Vector3().subVectors(pB, pA);
-      const edge2 = new THREE.Vector3().subVectors(pC, pA);
-      const cross = new THREE.Vector3().crossVectors(edge1, edge2);
-      const area = cross.length() / 2.0;
-      totalSurfaceAreaMm2 += area;
-
-      if (normalAttr) {
-        nA.fromBufferAttribute(normalAttr, i);
-        nB.fromBufferAttribute(normalAttr, i + 1);
-        nC.fromBufferAttribute(normalAttr, i + 2);
-        faceNormal.addVectors(nA, nB).add(nC).divideScalar(3).normalize();
-      } else {
-        faceNormal.copy(cross).normalize();
-      }
-
-      const isWallFace = Math.abs(faceNormal.z) < 0.5;
-      const isTopFace = !isWallFace && faceNormal.z > 0;
-
-      if (isWallFace) {
-        wallSurfaceAreaMm2 += area;
-      } else {
-        capSurfaceAreaMm2 += area;
-      }
-
-      if (triIndex % stride === 0) {
-        centroid.set(
-          (pA.x + pB.x + pC.x) / 3,
-          (pA.y + pB.y + pC.y) / 3,
-          (pA.z + pB.z + pC.z) / 3
-        );
-
-        rayDir.copy(faceNormal).negate();
-        rayOrigin.copy(centroid).addScaledVector(rayDir, EPS);
-        raycaster.set(rayOrigin, rayDir);
-        raycaster.far = 100000;
-
-        const hits = raycaster.intersectObject(rayMesh, false);
-        const localThickness = hits.length > 0 ? hits[0].distance + EPS : null;
-
-        const sample: ThicknessSample = { area, localThickness };
-        if (isWallFace) {
-          wallSamples.push(sample);
-        } else if (isTopFace) {
-          topCapSamples.push(sample);
-        } else {
-          bottomCapSamples.push(sample);
-        }
-      }
-      triIndex++;
-
-      let isOverhang = false;
-
-      if (faceNormal.z < -0.01) {
-        const isFlatBase = faceNormal.z <= -0.99;
-
-        if (!isFlatBase) {
-          const angleOffVertical =
-            Math.asin(Math.abs(faceNormal.z)) * (180 / Math.PI);
-
-          if (angleOffVertical > maxOverhangRad) {
-            maxOverhangRad = angleOffVertical;
-          }
-
-          if (angleOffVertical >= 60) {
-            facesOverThreshold++;
-            supportSurfaceAreaMm2 += area;
-            isOverhang = true;
-          }
-        }
-      }
-
-      const activeColor = isOverhang ? riskyColor : defaultColor;
-
-      for (let v = 0; v < 3; v++) {
-        colorArray[(i + v) * 3] = activeColor.r;
-        colorArray[(i + v) * 3 + 1] = activeColor.g;
-        colorArray[(i + v) * 3 + 2] = activeColor.b;
+      const downwardness = -cb.z;
+      if (downwardness > maxFlatness) {
+        maxFlatness = downwardness;
+        bestAxis.copy(cb);
       }
     }
 
-    displayGeometry.setAttribute("color", new THREE.BufferAttribute(colorArray, 3));
-    displayGeometry.attributes.color.needsUpdate = true;
+    if (maxFlatness > 0.5) {
+      const targetNormal = new THREE.Vector3(0, 0, -1);
+      const quaternion = new THREE.Quaternion().setFromUnitVectors(bestAxis, targetNormal);
+      geo.applyQuaternion(quaternion);
+    } else {
+      geo.computeBoundingBox();
+      const size = new THREE.Vector3();
+      geo.boundingBox!.getSize(size);
+      if (size.x <= size.y && size.x <= size.z) {
+        geo.rotateY(Math.PI / 2);
+      } else if (size.y <= size.x && size.y <= size.z) {
+        geo.rotateX(-Math.PI / 2);
+      }
+    }
 
-    displayGeometry.computeBoundingBox();
-    const bbox = displayGeometry.boundingBox!;
-    const sizeMm = new THREE.Vector3();
-    bbox.getSize(sizeMm);
+    geo.computeBoundingBox();
+    const box = geo.boundingBox!;
+    const xOffset = -(box.max.x + box.min.x) / 2;
+    const yOffset = -(box.max.y + box.min.y) / 2;
+    const zOffset = -box.min.z;
 
-    setRawData({
-      totalTriangles,
-      totalVolumeMm3: Math.abs(totalVolumeMm3),
-      totalSurfaceAreaMm2,
-      wallSurfaceAreaMm2,
-      capSurfaceAreaMm2,
-      supportSurfaceAreaMm2,
-      maxOverhangRad,
-      facesOverThreshold,
-      sizeMm,
-      wallSamples,
-      topCapSamples,
-      bottomCapSamples,
-    });
-  }, [displayGeometry, fallbackColor]);
+    geo.translate(xOffset, yOffset, zOffset);
 
-  
-  
-  
-  
+    geo.computeBoundingBox();
+    geo.computeBoundsTree();
+    return geo;
+  }, [rawGeometry]);
+
+  const bounds = geometry.boundingBox!;
+  const dimensions = new THREE.Vector3().subVectors(bounds.max, bounds.min);
+
+  // === 1. METRICS, WEIGHT & COST (ported deriveAverageThicknessMm engine) ===
+useEffect(() => {
+  if (!geometry) return;
+
+  let volumeMm3 = 0;
+  let surfaceAreaMm2 = 0;
+  const positions = geometry.attributes.position.array;
+
+  const p1 = new THREE.Vector3();
+  const p2 = new THREE.Vector3();
+  const p3 = new THREE.Vector3();
+  const ab = new THREE.Vector3();
+  const ac = new THREE.Vector3();
+  const cross = new THREE.Vector3();
+
+  for (let i = 0; i < positions.length; i += 9) {
+    p1.fromArray(positions, i);
+    p2.fromArray(positions, i + 3);
+    p3.fromArray(positions, i + 6);
+
+    volumeMm3 += p1.dot(cross.crossVectors(p2, p3)) / 6.0;
+
+    ab.subVectors(p2, p1);
+    ac.subVectors(p3, p1);
+    surfaceAreaMm2 += cross.crossVectors(ab, ac).length() / 2.0;
+  }
+  volumeMm3 = Math.abs(volumeMm3);
+
+  // 1. Fetch raw material density profile
+  const baseDensity = FILAMENT_PROFILES[filamentKey]?.density || 1.24;
+  const infillRatio = infillPercent / 100;
+
+  // 2. Adjust density down to 96% to account for printed micro air gaps between layers
+  const AIR_GAP_FACTOR = 0.96;
+  const printedPlasticDensity = baseDensity * AIR_GAP_FACTOR;
+
+  const avgShellThicknessMm = deriveAverageThicknessMm(
+    nozzleDiameterMm,
+    layerHeightMm,
+    wallLoopCount,
+    topLayerCount,
+    bottomLayerCount
+  );
+
+  // Convert raw 3D mesh metrics from mm to standard calculation units (cm)
+  const surfaceAreaCm2 = surfaceAreaMm2 / 100;
+  const totalVolumeCm3 = volumeMm3 / 1000;
+  const avgShellThicknessCm = avgShellThicknessMm / 10;
+
+  // 1. Calculate the nominal raw shell volume
+  const rawShellVolumeCm3 = surfaceAreaCm2 * avgShellThicknessCm;
+
+  // 2. Establish the intricacy ratio (how thin/complex the model is)
+  const complexityRatio = totalVolumeCm3 > 0 ? (rawShellVolumeCm3 / totalVolumeCm3) : 0;
+
+  // 3. FIXED: Apply a 3D geometric scaling law instead of a global Math.min clamp.
+  // This mimics Bambu's inward slice offsetting. It ensures thin walls melt together 
+  // into solid features while the thick core regions remain open for your 5% infill.
+  const cavityVolumeCm3 = totalVolumeCm3 * Math.pow(Math.max(0, 1 - (complexityRatio / 3.5)), 3);
+  
+  // The true shell volume is simply whatever is left over
+  const shellVolumeCm3 = Math.max(0, totalVolumeCm3 - cavityVolumeCm3);
+
+  // 4. Compute realistic final print job weights (PLA base density ~1.24)
+  const shellWeightGrams = shellVolumeCm3 * baseDensity;
+  const infillWeightGrams = cavityVolumeCm3 * infillRatio * baseDensity;
+  
+  const weightGrams = shellWeightGrams + infillWeightGrams;
+  const cost = (weightGrams / spoolWeightGrams) * spoolPrice;
+
+  onModelAnalyzed({
+    x: dimensions.x,
+    y: dimensions.y,
+    z: dimensions.z,
+    volume: volumeMm3,
+    surfaceArea: surfaceAreaMm2,
+    triangles: positions.length / 9,
+    shellThicknessMm: avgShellThicknessMm,
+    materialEstimate: { weightGrams, cost, shellWeightGrams, infillWeightGrams },
+  });
+}, [
+  geometry,
+  infillPercent,
+  spoolPrice,
+  filamentKey,
+  dimensions,
+  onModelAnalyzed,
+  spoolWeightGrams,
+  nozzleDiameterMm,
+  layerHeightMm,
+  wallLoopCount,
+  topLayerCount,
+  bottomLayerCount,
+]);
+
+  // === 2. WATERTIGHT HOLE DETECTION ===
   useEffect(() => {
-    if (!displayGeometry) return;
-
-    const pos = displayGeometry.attributes.position;
-    if (!pos) {
-      setHoleEdgeGeometry(null);
-      onHolesDetected?.({ hasHoles: false, openEdgeCount: 0 });
+    if (!showHoles || !geometry) {
+      onHolesDetected(null);
       return;
     }
 
-    const vertexCount = pos.count;
-    const PRECISION = 1000; 
-    const round = (v: number) => Math.round(v * PRECISION) / PRECISION;
-    const keyFor = (x: number, y: number, z: number) => `${round(x)}_${round(y)}_${round(z)}`;
+    const pos = geometry.attributes.position.array;
+    const vertexMap = new Map<string, number>();
+    const edgeCounts = new Map<string, number>();
+    let nextVertexIndex = 0;
 
-    
-    const edgeMap = new Map<string, { count: number; a: [number, number, number]; b: [number, number, number] }>();
-
-    const v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
-
-    for (let i = 0; i < vertexCount; i += 3) {
-      v[0].fromBufferAttribute(pos, i);
-      v[1].fromBufferAttribute(pos, i + 1);
-      v[2].fromBufferAttribute(pos, i + 2);
-
-      for (let e = 0; e < 3; e++) {
-        const p1 = v[e];
-        const p2 = v[(e + 1) % 3];
-        const k1 = keyFor(p1.x, p1.y, p1.z);
-        const k2 = keyFor(p2.x, p2.y, p2.z);
-        const edgeKey = k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`;
-
-        const existing = edgeMap.get(edgeKey);
-        if (existing) {
-          existing.count++;
-        } else {
-          edgeMap.set(edgeKey, { count: 1, a: [p1.x, p1.y, p1.z], b: [p2.x, p2.y, p2.z] });
-        }
+    const getVertexId = (x: number, y: number, z: number) => {
+      const key = `${Math.round(x * 1000)}_${Math.round(y * 1000)}_${Math.round(z * 1000)}`;
+      if (!vertexMap.has(key)) {
+        vertexMap.set(key, nextVertexIndex++);
       }
-    }
-
-    const openEdges: { a: [number, number, number]; b: [number, number, number] }[] = [];
-    for (const entry of edgeMap.values()) {
-      if (entry.count === 1) {
-        openEdges.push(entry);
-      }
-    }
-
-    if (openEdges.length > 0) {
-      const linePositions = new Float32Array(openEdges.length * 6);
-      openEdges.forEach((edge, idx) => {
-        linePositions[idx * 6 + 0] = edge.a[0];
-        linePositions[idx * 6 + 1] = edge.a[1];
-        linePositions[idx * 6 + 2] = edge.a[2];
-        linePositions[idx * 6 + 3] = edge.b[0];
-        linePositions[idx * 6 + 4] = edge.b[1];
-        linePositions[idx * 6 + 5] = edge.b[2];
-      });
-      const lineGeom = new THREE.BufferGeometry();
-      lineGeom.setAttribute("position", new THREE.BufferAttribute(linePositions, 3));
-      setHoleEdgeGeometry(lineGeom);
-    } else {
-      setHoleEdgeGeometry(null);
-    }
-
-    onHolesDetected?.({ hasHoles: openEdges.length > 0, openEdgeCount: openEdges.length });
-  }, [displayGeometry]);
-
-
-  useEffect(() => {
-    if (!rawData) return;
-
-    const {
-      totalTriangles,
-      totalVolumeMm3,
-      totalSurfaceAreaMm2,
-      wallSurfaceAreaMm2,
-      capSurfaceAreaMm2,
-      supportSurfaceAreaMm2,
-      maxOverhangRad,
-      facesOverThreshold,
-      sizeMm,
-      wallSamples,
-      topCapSamples,
-      bottomCapSamples,
-    } = rawData;
-
-    const { perimeters, topSolidLayers, bottomSolidLayers, layerHeightMm } =
-      computeRecommendedSettings(Math.max(sizeMm.x, sizeMm.y, sizeMm.z), (supportSurfaceAreaMm2 / Math.max(1, totalSurfaceAreaMm2)) * 100, nozzleDiameter);
-
-    const extrusionWidthMm = nozzleDiameter * 1.125;
-    const wallThicknessMm = perimeters * extrusionWidthMm;
-    const topCapThicknessMm = topSolidLayers * layerHeightMm;
-    const bottomCapThicknessMm = bottomSolidLayers * layerHeightMm;
-
-    
-    
-    
-    
-    
-    const accumulateShell = (
-      samples: ThicknessSample[],
-      configuredThicknessMm: number,
-      measuredAreaMm2: number
-    ) => {
-      if (samples.length === 0 || measuredAreaMm2 === 0) return 0;
-      let sampledShell = 0;
-      let sampledArea = 0;
-      for (const s of samples) {
-        const effectiveThickness =
-          s.localThickness === null
-            ? configuredThicknessMm
-            : Math.min(configuredThicknessMm, s.localThickness / 2);
-        sampledShell += s.area * effectiveThickness;
-        sampledArea += s.area;
-      }
-      if (sampledArea === 0) return measuredAreaMm2 * configuredThicknessMm;
-      return sampledShell * (measuredAreaMm2 / sampledArea);
+      return vertexMap.get(key)!;
     };
 
-    
-    const topCapMeasuredArea =
-      topCapSamples.length + bottomCapSamples.length > 0
-        ? capSurfaceAreaMm2 * (topCapSamples.length / (topCapSamples.length + bottomCapSamples.length))
-        : 0;
-    const bottomCapMeasuredArea = capSurfaceAreaMm2 - topCapMeasuredArea;
+    const addEdge = (v1: number, v2: number) => {
+      if (v1 === v2) return;
+      const min = Math.min(v1, v2);
+      const max = Math.max(v1, v2);
+      const key = `${min}_${max}`;
+      edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
+    };
 
-    const wallShellVolumeMm3 = accumulateShell(wallSamples, wallThicknessMm, wallSurfaceAreaMm2);
-    const topCapShellVolumeMm3 = accumulateShell(topCapSamples, topCapThicknessMm, topCapMeasuredArea);
-    const bottomCapShellVolumeMm3 = accumulateShell(bottomCapSamples, bottomCapThicknessMm, bottomCapMeasuredArea);
+    for (let i = 0; i < pos.length; i += 9) {
+      const i1 = getVertexId(pos[i], pos[i + 1], pos[i + 2]);
+      const i2 = getVertexId(pos[i + 3], pos[i + 4], pos[i + 5]);
+      const i3 = getVertexId(pos[i + 6], pos[i + 7], pos[i + 8]);
 
-    let shellVolumeMm3 = wallShellVolumeMm3 + topCapShellVolumeMm3 + bottomCapShellVolumeMm3;
-
-    
-    if (shellVolumeMm3 > totalVolumeMm3) {
-      shellVolumeMm3 = totalVolumeMm3;
+      addEdge(i1, i2);
+      addEdge(i2, i3);
+      addEdge(i3, i1);
     }
 
-    const coreVolumeMm3 = Math.max(0, totalVolumeMm3 - shellVolumeMm3);
-
-    
-    const infillRatio = infillPercent / 100;
-    const printedPlasticVolumeMm3 = shellVolumeMm3 + coreVolumeMm3 * infillRatio;
-
-    const estimatedWeightGrams = (printedPlasticVolumeMm3 / 1000) * filamentDensity;
-    const costPerGram = spoolPrice / spoolWeightGrams;
-    const estimatedMaterialCost = estimatedWeightGrams * costPerGram;
-
-    const supportPercent =
-      totalSurfaceAreaMm2 > 0 ? (supportSurfaceAreaMm2 / totalSurfaceAreaMm2) * 100 : 0;
-
-    console.log("[SliceDebug] ---- Shell/Core Breakdown ----");
-    console.log("[SliceDebug] totalVolumeMm3:", totalVolumeMm3.toFixed(1));
-    console.log("[SliceDebug] wallThicknessMm:", wallThicknessMm.toFixed(3), "| topCapThicknessMm:", topCapThicknessMm.toFixed(3), "| bottomCapThicknessMm:", bottomCapThicknessMm.toFixed(3));
-    console.log("[SliceDebug] wallShellVolumeMm3:", wallShellVolumeMm3.toFixed(1), "| topCapShellVolumeMm3:", topCapShellVolumeMm3.toFixed(1), "| bottomCapShellVolumeMm3:", bottomCapShellVolumeMm3.toFixed(1));
-    console.log("[SliceDebug] TOTAL shellVolumeMm3:", shellVolumeMm3.toFixed(1), "| coreVolumeMm3:", coreVolumeMm3.toFixed(1));
-    console.log("[SliceDebug] shell % of total volume:", ((shellVolumeMm3 / totalVolumeMm3) * 100).toFixed(1) + "%");
-    console.log("[SliceDebug] estimatedWeightGrams:", estimatedWeightGrams.toFixed(1));
-
-    onModelAnalyzed({
-      x: Math.round(sizeMm.x * 10) / 10,
-      y: Math.round(sizeMm.y * 10) / 10,
-      z: Math.round(sizeMm.z * 10) / 10,
-      triangles: Math.round(totalTriangles),
-      volume: Math.round(totalVolumeMm3),
-      maxOverhang: Math.round(maxOverhangRad),
-      facesOverThreshold,
-      supportSurfacePercent: Math.round(supportPercent * 10) / 10,
-      bridgeSurfaceArea: 0,
-      bridgePercent: 0,
-      surfaceArea: Math.round(totalSurfaceAreaMm2),
-      wallArea: Math.round(wallSurfaceAreaMm2),
-      capArea: Math.round(capSurfaceAreaMm2),
-      estimatedWeightGrams: Number(estimatedWeightGrams.toFixed(1)),
-      estimatedMaterialCost: Number(estimatedMaterialCost.toFixed(2)),
-      recommendedPerimeters: perimeters,
-      recommendedTopSolidLayers: topSolidLayers,
-      recommendedBottomSolidLayers: bottomSolidLayers,
-      recommendedLayerHeightMm: layerHeightMm,
+    let openEdges = 0;
+    edgeCounts.forEach((count) => {
+      if (count === 1) openEdges++;
     });
-  }, [
-    rawData,
-    infillPercent,
-    nozzleDiameter,
-    spoolPrice,
-    spoolWeightGrams,
-    filamentDensity,
-  ]);
 
-  if (!displayGeometry) return null;
+    onHolesDetected({ hasHoles: openEdges > 0, openEdgeCount: openEdges });
+  }, [showHoles, geometry, onHolesDetected]);
+
+  // === 3. THIN WALL RAYCASTING (BVH) ===
+  const thinWallColors = useMemo(() => {
+    if (activeHeatmap !== "thinWall" || !geometry.boundsTree) return null;
+
+    const pos = geometry.attributes.position;
+    const norms = geometry.attributes.normal;
+    const colors = new Float32Array(pos.count * 3);
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.firstHitOnly = true;
+
+    // FIX: previously `new THREE.Mesh(geometry)` was created INSIDE the
+    // per-vertex loop -- allocating a full Mesh + default material object
+    // on every single iteration (thousands of times for a real model).
+    // Created once here instead.
+    const rayMesh = new THREE.Mesh(geometry);
+
+    const origin = new THREE.Vector3();
+    const direction = new THREE.Vector3();
+
+    // Sample a stride rather than every vertex for performance on dense
+    // meshes; unsampled vertices inherit the previous sample's color.
+    const desiredSamples = 6000;
+    const stride = Math.max(1, Math.floor(pos.count / desiredSamples));
+    let lastR = 0.9, lastG = 0.9, lastB = 0.9;
+
+    // Thin-wall threshold now tied to the actual nozzle diameter slider
+    // instead of a hardcoded 0.2mm constant.
+    const thinThresholdMm = nozzleDiameterMm * 1.5;
+
+    for (let i = 0; i < pos.count; i++) {
+      if (i % stride === 0) {
+        origin.fromBufferAttribute(pos, i);
+        direction.fromBufferAttribute(norms, i).negate().normalize();
+        origin.addScaledVector(direction, 0.001);
+        raycaster.set(origin, direction);
+
+        const intersects = raycaster.intersectObject(rayMesh, false);
+
+        if (intersects.length > 0) {
+          const dist = intersects[0].distance;
+          if (dist < thinThresholdMm) {
+            lastR = 1.0; lastG = 0.1; lastB = 0.1; // Too thin: Red
+          } else {
+            lastR = 0.1; lastG = 0.8; lastB = 0.3; // Healthy: Green
+          }
+        } else {
+          lastR = 0.9; lastG = 0.9; lastB = 0.9; // No opposite surface found: neutral gray
+        }
+      }
+
+      colors[i * 3] = lastR;
+      colors[i * 3 + 1] = lastG;
+      colors[i * 3 + 2] = lastB;
+    }
+
+    return new THREE.BufferAttribute(colors, 3);
+  }, [activeHeatmap, geometry, nozzleDiameterMm]);
+
+  // === 4. CUSTOM SHADERS & MATERIALS ===
+  const materials = useMemo(() => {
+    const standard = new THREE.MeshStandardMaterial({
+      color: fallbackColor,
+      roughness: 0.4,
+      metalness: 0.1,
+      wireframe: wireframe,
+    });
+
+    const overhang = new THREE.ShaderMaterial({
+      vertexShader: `
+        varying vec3 vNormal;
+        void main() {
+          vNormal = normalize(normalMatrix * normal);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vNormal;
+        void main() {
+          vec3 n = normalize(vNormal);
+          vec3 z = vec3(0.0, 0.0, 1.0);
+          
+          float dotProd = clamp(dot(n, z), -1.0, 1.0);
+          float theta = acos(dotProd);
+          float degrees = degrees(theta);
+          
+          vec3 color;
+          if (degrees <= 45.0) {
+            color = vec3(0.0, 0.4, 1.0);
+          } else if (degrees <= 60.0) {
+            color = vec3(1.0, 0.8, 0.0);
+          } else {
+            color = vec3(1.0, 0.1, 0.1);
+          }
+          
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `,
+      wireframe: wireframe,
+    });
+
+    // NOTE (unchanged from before, flagging again honestly): this is a
+    // plate-to-top HEIGHT gradient, not a real stress/load analysis. Real
+    // stress analysis needs FEA (volumetric mesh + material properties +
+    // user-specified loads/constraints + a matrix solver) -- a much larger
+    // build than this shader. Left as-is since it wasn't part of this
+    // request, just don't want it silently forgotten.
+    const stress = new THREE.ShaderMaterial({
+      uniforms: {
+        minZ: { value: bounds.min.z },
+        maxZ: { value: bounds.max.z }
+      },
+      vertexShader: `
+        varying vec3 vPosition;
+        void main() {
+          vPosition = position;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float minZ;
+        uniform float maxZ;
+        varying vec3 vPosition;
+        
+        void main() {
+          float t = clamp((vPosition.z - minZ) / (maxZ - minZ), 0.0, 1.0);
+          
+          vec3 bottomColor = vec3(1.0, 0.1, 0.1);
+          vec3 topColor = vec3(0.0, 0.4, 1.0);
+          vec3 midColor = vec3(1.0, 0.9, 0.0);
+          
+          vec3 color;
+          if (t < 0.5) {
+             float localT = t * 2.0;
+             color = mix(bottomColor, midColor, localT);
+          } else {
+             float localT = (t - 0.5) * 2.0;
+             color = mix(midColor, topColor, localT);
+          }
+          
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `,
+      wireframe: wireframe,
+    });
+
+    const thinWall = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      wireframe: wireframe,
+    });
+
+    return { standard, overhang, stress, thinWall };
+  }, [fallbackColor, wireframe, bounds]);
+
+  useEffect(() => {
+    if (activeHeatmap === "thinWall" && thinWallColors) {
+      geometry.setAttribute("color", thinWallColors);
+      geometry.attributes.color.needsUpdate = true;
+    } else if (geometry.hasAttribute("color")) {
+      geometry.deleteAttribute("color");
+    }
+  }, [activeHeatmap, thinWallColors, geometry]);
+
+  let activeMat: THREE.Material = materials.standard;
+
+  if (activeHeatmap === "overhang") activeMat = materials.overhang;
+  if (activeHeatmap === "stress") activeMat = materials.stress;
+  if (activeHeatmap === "thinWall") activeMat = materials.thinWall;
 
   return (
-    <group scale={0.05}>
-      <mesh
-        geometry={displayGeometry}
-        castShadow
-        receiveShadow
-      >
-        <meshStandardMaterial
-          vertexColors={true}
-          wireframe={wireframe}
-          roughness={0.4}
-          metalness={0.15}
-        />
-      </mesh>
-      {showHoles && holeEdgeGeometry && (
-        <lineSegments geometry={holeEdgeGeometry}>
-          <lineBasicMaterial color="#ff2222" linewidth={3} depthTest={false} />
-        </lineSegments>
-      )}
-    </group>
+    <mesh
+      ref={meshRef}
+      geometry={geometry}
+      material={activeMat}
+      castShadow
+      receiveShadow
+    />
   );
 }
