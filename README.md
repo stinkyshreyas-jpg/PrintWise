@@ -8,6 +8,7 @@ This is a passion project being developed by a sophomore!
 Analyze 3D models
 Recommend print settings
 Explain engineering reasoning behind recommendations
+Give users different thermal heatmaps to see how it performs against stress, overhang, and thin walls
 
 
 
