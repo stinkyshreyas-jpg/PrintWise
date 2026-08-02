@@ -1,84 +1,102 @@
-/* ==========================================================================
-   1. PREMIUM GEOMETRIC WEB FONT ENGINE
-   ========================================================================== */
-@import url('https://googleapis.com');
+
+:root {
+ 
+  --bg-canvas: #fbfbfa;             
+  --card-bg: rgba(255, 255, 255, 0.88);
+  --card-border: rgba(0, 0, 0, 0.07);
+  
+ 
+  --text-primary: #191919;          
+  --text-secondary: #787774;        
+  --text-tertiary: #9b9a97;         
+
+ 
+  --accent-primary: #232326;        
+  --accent-primary-hover: #000000;
+  --accent-blue: #0066cc;           
+  --badge-bg: #f0f0ef;              
+  
+ 
+  --divider: rgba(55, 53, 47, 0.09);
+  --slider-track: #eaeaea;
+}
+
+
+@font-face {
+  font-family: 'SF Pro Display';
+  src: url('./assets/fonts/SFPRODISPLAYMEDIUM.OTF') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
 
 *, *::before, *::after {
   box-sizing: border-box;
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
-  letter-spacing: -0.015em; 
+  font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  letter-spacing: 0.05em; 
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-html, body, div, span, h1, h2, h3, h4, h5, h6, p, label, input, button, select, textarea {
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+html, body, div, span, h1, h2, h3, h4, h5, h6, p, label, input, button, select, textarea, svg text {
+  font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
 }
 
-/* ANTI-BLEACH CANVAS: Rich, slightly deeper warm gray background gives contrast to cards */
 body {
   margin: 0;
   padding: 32px;
-  background-color: #f2f2f7; 
-  color: #1d1d1f;
+  background-color: var(--bg-canvas); 
+  color: var(--text-primary);
 }
 
-/* ==========================================================================
-   2. SIDEBAR LAYOUT CONSTRAINTS
-   ========================================================================== */
+
 .sidebar-container {
   display: flex;
   flex-direction: column;
-  gap: 20px; /* Generous spacing creates premium breathing room */
+  gap: 20px;
   width: 100%;
   max-width: 380px; 
 }
 
-/* ==========================================================================
-   3. THE PREMIUM GLASSMORPHIC CARD (FIXES THE BLANCHED LOOK)
-   ========================================================================== */
+
 .apple-card {
-  /* Instead of flat absolute white, use glass-like semi-transparency */
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(20px); /* Premium iOS frosted-glass blur filter */
+  background: var(--card-bg);
+  backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   
   padding: 28px;
-  border-radius: 20px; /* Sweeping, modern continuous curves */
+  border-radius: 20px;
   
-  /* DEEP NESTED SHADOWS: Simulates true structural physical layers */
   box-shadow: 
-    0 1px 2px rgba(0, 0, 0, 0.05),
-    0 10px 30px rgba(0, 0, 0, 0.04),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6); /* Adds a sharp, micro internal light reflection edge */
+    0 1px 3px rgba(0, 0, 0, 0.03),
+    0 8px 24px rgba(0, 0, 0, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
     
-  border: 1px solid rgba(0, 0, 0, 0.06); /* Ultra-fine, subtle border */
+  border: 1px solid var(--card-border);
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
 
-/* ==========================================================================
-   4. BRANDING BANNERS & HEADERS
-   ========================================================================== */
+
 .printwise-header {
-  background: linear-gradient(135deg, #1d1d1f 0%, #000000 100%); /* Depth gradient, not flat black */
+  background: var(--accent-primary);
   color: #ffffff;
   text-align: center;
-  padding: 18px;
-  border-radius: 16px;
-  font-size: 13px;
+  padding: 16px;
+  border-radius: 14px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.12em; /* Bold tracking separation for brand identity */
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
 }
 
 .card-title {
   margin: 0;
-  font-size: 17px;
-  font-weight: 700; /* Extra bold headings pop against the light canvas */
-  color: #1d1d1f;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -87,33 +105,30 @@ body {
 .field-label {
   font-size: 12px;
   font-weight: 600;
-  color: #6e6e73; /* Muted slate gray */
+  color: var(--text-secondary);
   margin-bottom: 8px;
   display: block;
 }
 
 .apple-divider {
   border: none;
-  border-top: 1px solid rgba(0, 0, 0, 0.05);
+  border-top: 1px solid var(--divider);
   margin: 4px 0;
 }
 
-/* ==========================================================================
-   5. INTERACTION BUTTONS & BADGES
-   ========================================================================== */
+
 .apple-file-input {
   font-size: 13px;
-  color: #1d1d1f;
+  color: var(--text-primary);
   cursor: pointer;
   padding: 8px;
-  background: rgba(0, 0, 0, 0.03); /* Soft recessed background indentation */
+  background: rgba(0, 0, 0, 0.03);
   border-radius: 8px;
   width: 100%;
 }
 
-/* Vibrant Apple System Blue Pill Button with a soft radial depth lift */
 .apple-btn-primary {
-  background: linear-gradient(180deg, #0077ed 0%, #0066cc 100%);
+  background: var(--accent-primary);
   color: #ffffff;
   border: none;
   padding: 12px 24px;
@@ -122,28 +137,27 @@ body {
   font-weight: 600; 
   cursor: pointer;
   text-align: center;
-  box-shadow: 0 4px 12px rgba(0, 113, 227, 0.25); /* Colored ambient glow prevents bleaching */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   width: 100%;
 }
 
 .apple-btn-primary:hover {
-  background: linear-gradient(180deg, #1482ff 0%, #0071e3 100%);
-  box-shadow: 0 6px 16px rgba(0, 113, 227, 0.35);
-  transform: translateY(-1px); /* Physical elevation movement */
+  background: var(--accent-primary-hover);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  transform: translateY(-1px);
 }
 
 .apple-btn-primary:active {
   transform: translateY(1px) scale(0.98);
-  box-shadow: 0 2px 6px rgba(0, 113, 227, 0.2);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
 }
 
-/* High-contrast status pill badge */
 .apple-badge {
-  background-color: #e8e8ed;
-  color: #1d1d1f;
+  background-color: var(--badge-bg);
+  color: var(--text-primary);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   padding: 5px 12px;
   border-radius: 980px;
   text-transform: uppercase;
@@ -155,7 +169,7 @@ body {
   align-items: center;
   gap: 10px;
   font-size: 14px;
-  color: #1d1d1f;
+  color: var(--text-primary);
   font-weight: 500;
   cursor: pointer;
   margin-top: 4px;
@@ -163,20 +177,18 @@ body {
 
 .apple-checkbox-container input[type="checkbox"] {
   cursor: pointer;
-  accent-color: #0071e3;
+  accent-color: var(--accent-blue);
   width: 18px;
   height: 18px;
 }
 
-/* ==========================================================================
-   6. DATA GRID ROWS DETAILED MATRIX
-   ========================================================================== */
+
 .metric-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 10px 0;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.03); 
+  border-bottom: 1px solid var(--divider); 
   font-size: 14px;
 }
 
@@ -185,28 +197,26 @@ body {
 }
 
 .metric-label {
-  color: #6e6e73; 
+  color: var(--text-secondary); 
   font-weight: 500;
 }
 
 .metric-value {
-  color: #000000; /* Pure black metric outputs makes the text pop and read clearly */
+  color: var(--text-primary);
   font-weight: 600;
 }
 
 .metric-section-title {
   font-size: 11px;
   font-weight: 700;
-  color: #86868b;
+  color: var(--text-tertiary);
   margin-top: 16px;
   margin-bottom: 2px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
-/* ==========================================================================
-   7. CHROME DIAL COMPANION RANGE SLIDERS
-   ========================================================================== */
+
 .slider-group {
   display: flex;
   flex-direction: column;
@@ -218,28 +228,24 @@ input[type="range"].apple-slider {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 6px; /* Slightly thicker track for easier interaction */
-  background: #e5e5e7;
+  height: 5px;
+  background: var(--slider-track);
   border-radius: 980px;
   outline: none;
   margin: 12px 0;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05); /* Recessed inner slot shadow */
 }
 
-/* Webkit (Safari, Chrome, Edge) Styles */
 input[type="range"].apple-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: #ffffff;
-  border: 0.5px solid rgba(0, 0, 0, 0.08);
-  /* Heavily optimized tactile dial shadow layout */
+  border: 0.5px solid rgba(0, 0, 0, 0.12);
   box-shadow: 
-    0 0 1px rgba(0,0,0,0.1), 
-    0 4px 8px rgba(0,0,0,0.15), 
-    0 1px 3px rgba(0,0,0,0.1);
+    0 1px 3px rgba(0,0,0,0.1), 
+    0 3px 8px rgba(0,0,0,0.08);
   cursor: pointer;
   transition: transform 0.1s cubic-bezier(0.25, 1, 0.5, 1);
 }
@@ -250,20 +256,5 @@ input[type="range"].apple-slider::-webkit-slider-thumb:hover {
 
 input[type="range"].apple-slider::-webkit-slider-thumb:active {
   transform: scale(1.15);
-  background: #f5f5f7;
-}
-
-/* Firefox Styles */
-input[type="range"].apple-slider::-moz-range-thumb {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: #ffffff;
-  border: 0.5px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 
-    0 0 1px rgba(0,0,0,0.1), 
-    0 4px 8px rgba(0,0,0,0.15), 
-    0 1px 3px rgba(0,0,0,0.1);
-  cursor: pointer;
-  transition: transform 0.1s cubic-bezier(0.25, 1, 0.5, 1);
+  background: #f9f9f9;
 }
