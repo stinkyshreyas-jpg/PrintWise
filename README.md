@@ -13,20 +13,87 @@ Explain engineering reasoning behind recommendations
 
 ## Development Log
 
-July 19, 2026:
-Created the PrintWise project.
+**Date:** July 19, 2026
 
-July 20, 2026:
-Added an STL Viewer with a grid view.
+**Completed:**
 
-July 21, 2026:
-Added basic measurements for STL's like height, width, depth, and triangle count.
+- Created PrintWise GitHub repository
+- Wrote first README
+- Solved Git HTTPS push issue
 
-July 22, 2026:
-Added calculations for weight for PLA volume using Gaussian Divergence.
+**Date:** July 20, 2026
 
-July 23, 2026:
-Added STL Overhang Features and Support Risk
+**Completed:**
 
-July 24, 2026:
-Fixed weight calculations and different CSS style
+- STL Viewer setup
+- Grid view and isometric view setup
+- File uploader ready?
+
+**Date:** July 21, 2026
+
+**Completed:**
+
+- Calculates the height, width, and length and triangles of any STL
+
+**Date:** July 22, 2026
+
+**Completed:**
+
+- Added volume and weight calculations for PLA 100% infill
+
+**Date:** July 23, 2026
+
+**Completed:**
+
+- Added STL Overhang Features and Support Risk
+
+**Date:** July 24, 2026
+
+**Completed:**
+
+- Fixed weight calculations and added a different CSS Style
+
+**Date:** July 25, 2026
+
+**Completed:**
+
+- Took break
+
+**Date:** July 26, 2026
+
+**Completed:**
+
+- Added a new interface with different print profile change
+- Added new UI and a new weight calculation system and new print settings
+
+**Date:** July 27, 2026
+
+**Completed:**
+
+- Cleaned up comments and whitespace in Model.tsx
+- Updated Model.tsx logic and overhang math
+
+**Date:** July 28, 2026
+
+**Completed:**
+
+- Better weight calculations and optimizations
+- Added wall loops, layers, and layer height recommendations based on nozzle diameter
+
+**Date:** July 29, 2026
+
+**Completed:**
+
+- Rewrote project overview
+
+**Date:** July 30, 2026
+
+**Completed:**
+
+- Added thermal maps for different stress levels, thin walls, and overhang detection
+
+**Date:** August 1, 2026
+
+**Completed:**
+
+- Complete revamp of UI with radial menus and printer selection
