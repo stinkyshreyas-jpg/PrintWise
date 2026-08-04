@@ -1,83 +1,44 @@
-import React, { Suspense, useState, useRef, useMemo } from "react";
+import React, { Suspense, useState, useRef, useMemo, useEffect } from "react";
 import * as THREE from "three";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import Model from "./Model";
 import RadialWheel from "./RadialWheel";
 
-const FILAMENT_PROFILES: Record<string, { name: string; density: number; defaultTemp: number }> = {
-  PLA: { name: "PLA", density: 1.24, defaultTemp: 210 },
-  PETG: { name: "PETG", density: 1.27, defaultTemp: 240 },
-  ABS: { name: "ABS", density: 1.04, defaultTemp: 250 },
-  TPU: { name: "TPU (Flexible)", density: 1.21, defaultTemp: 220 },
-};
+
+
+
+
+export const PRESETS = [
+  { value: "balanced", label: "Balanced", targetRatio: 0.50, walls: 3, infill: 15 },
+  { value: "appearance", label: "Best Appearance", targetRatio: 0.30, walls: 2, infill: 10 },
+  { value: "strength", label: "Max Strength", targetRatio: 0.50, walls: 5, infill: 50 },
+  { value: "fastest", label: "Fastest Print", targetRatio: 0.70, walls: 2, infill: 10 },
+  { value: "lowest_cost", label: "Lowest Cost", targetRatio: 0.65, walls: 2, infill: 5 },
+  { value: "lightest", label: "Lightest Part", targetRatio: 0.50, walls: 2, infill: 5 },
+];
+
+function getClosestIndex(arr: number[], target: number): number {
+  return arr.reduce((bestIdx, curr, idx) =>
+    Math.abs(curr - target) < Math.abs(arr[bestIdx] - target) ? idx : bestIdx
+  , 0);
+}
 
 export const PRINTER_OPTIONS = [
-  {
-    label: "Bambu X1-Carbon",
-    value: "x1c",
-    iconUrl: "/printers/x1c.png",
-    defaults: { nozzle: 1, layerHeight: 3, wallLoops: 1, infill: 2 },
-  },
-  {
-    label: "Bambu P1S",
-    value: "p1s",
-    iconUrl: "/printers/p1s.png",
-    defaults: { nozzle: 1, layerHeight: 3, wallLoops: 1, infill: 2 },
-  },
-  {
-    label: "Bambu P2S",
-    value: "p2s",
-    iconUrl: "/printers/p2s.png",
-    defaults: { nozzle: 1, layerHeight: 3, wallLoops: 1, infill: 2 },
-  },
-  {
-    label: "Bambu A1",
-    value: "a1",
-    iconUrl: "/printers/a1.png",
-    defaults: { nozzle: 1, layerHeight: 3, wallLoops: 1, infill: 2 },
-  },
-  {
-    label: "Bambu A1 Mini",
-    value: "a1_mini",
-    iconUrl: "/printers/a1_mini.png",
-    defaults: { nozzle: 1, layerHeight: 2, wallLoops: 1, infill: 2 },
-  },
-  {
-    label: "Bambu H2C",
-    value: "h2c",
-    iconUrl: "/printers/h2c.png",
-    defaults: { nozzle: 1, layerHeight: 2, wallLoops: 1, infill: 2 },
-  },
-  {
-    label: "Bambu H2D",
-    value: "h2d",
-    iconUrl: "/printers/h2d.png",
-    defaults: { nozzle: 1, layerHeight: 2, wallLoops: 1, infill: 2 },
-  },
+  { label: "Bambu X1-Carbon", value: "x1c", iconUrl: "/printers/x1c.png", bedSize: { x: 256, y: 256, z: 256 }, defaults: { nozzle: 1, layerHeight: 3, wallLoops: 1, infill: 2 } },
+  { label: "Bambu P1S", value: "p1s", iconUrl: "/printers/p1s.png", bedSize: { x: 256, y: 256, z: 256 }, defaults: { nozzle: 1, layerHeight: 3, wallLoops: 1, infill: 2 } },
+  { label: "Bambu P2S", value: "p2s", iconUrl: "/printers/p2s.png", bedSize: { x: 256, y: 256, z: 256 }, defaults: { nozzle: 1, layerHeight: 3, wallLoops: 1, infill: 2 } },
+  { label: "Bambu A1", value: "a1", iconUrl: "/printers/a1.png", bedSize: { x: 256, y: 256, z: 256 }, defaults: { nozzle: 1, layerHeight: 3, wallLoops: 1, infill: 2 } },
+  { label: "Bambu A1 Mini", value: "a1_mini", iconUrl: "/printers/a1_mini.png", bedSize: { x: 180, y: 180, z: 180 }, defaults: { nozzle: 1, layerHeight: 2, wallLoops: 1, infill: 2 } },
+  { label: "Bambu H2C", value: "h2c", iconUrl: "/printers/h2c.png", bedSize: { x: 330, y: 320, z: 325 }, defaults: { nozzle: 1, layerHeight: 2, wallLoops: 1, infill: 2 } },
+  { label: "Bambu H2D", value: "h2d", iconUrl: "/printers/h2d.png", bedSize: { x: 350, y: 320, z: 325 }, defaults: { nozzle: 1, layerHeight: 2, wallLoops: 1, infill: 2 } },
 ];
 
 export const MATERIAL_OPTIONS = [
-  {
-    label: "PLA",
-    value: "PLA",
-    iconUrl: "/materials/pla.png",
-  },
-  {
-    label: "PETG",
-    value: "PETG",
-    iconUrl: "/materials/petg.png",
-  },
-  {
-    label: "ABS",
-    value: "ABS",
-    iconUrl: "/materials/abs.png",
-  },
-  {
-    label: "TPU",
-    value: "TPU",
-    iconUrl: "/materials/tpu.png",
-  },
+  { label: "PLA", value: "PLA", iconUrl: "/materials/pla.png" },
+  { label: "PETG", value: "PETG", iconUrl: "/materials/petg.png" },
+  { label: "ABS", value: "ABS", iconUrl: "/materials/abs.png" },
+  { label: "TPU", value: "TPU", iconUrl: "/materials/tpu.png" },
 ];
 
 const NOZZLE_OPTIONS = [
@@ -129,6 +90,175 @@ const INFILL_OPTIONS = [
   { label: "100%", value: 100 },
 ];
 
+const HEATMAP_MODES = [
+  { key: "none", label: "None" },
+  { key: "overhang", label: "Overhang" },
+  { key: "stress", label: "Stress" },
+  { key: "thinWall", label: "Thin Walls" },
+] as const;
+
+
+
+
+
+function calculatePrintabilityScore(
+  analysis: any,
+  holeAnalysis: { hasHoles: boolean; openEdgeCount: number } | null,
+  printerBed: { x: number; y: number; z: number },
+  nozzleDiameterMm: number
+) {
+  if (!analysis) return null;
+
+  const {
+    overhangRatio = 0,
+    stressScore = 0,
+    thinWallRatio = 0,
+  } = analysis.heatmapMetrics || {};
+
+  
+  let meshScore = 100;
+  if (holeAnalysis?.hasHoles) {
+    meshScore = Math.max(0, 100 - (holeAnalysis.openEdgeCount || 0) * 12);
+  }
+
+  
+  
+  
+  let overhangScore = 100;
+  if (overhangRatio > 0.03) {
+    const excessRatio = overhangRatio - 0.03;
+    const penalty = Math.min(100, Math.pow(excessRatio * 8.0, 1.8) * 100);
+    overhangScore = Math.max(0, Math.round(100 - penalty));
+  }
+
+  
+  
+  const effectiveWallRatio = Math.max(0, thinWallRatio - 0.02);
+  const wallScore = Math.max(0, Math.round(100 - effectiveWallRatio * 150));
+
+  
+  const fitsX = analysis.x <= printerBed.x;
+  const fitsY = analysis.y <= printerBed.y;
+  const fitsZ = analysis.z <= printerBed.z;
+
+  let fitAndStressScore = 100;
+  if (!fitsX || !fitsY || !fitsZ) {
+    fitAndStressScore = 0;
+  } else {
+    const stressPenalty = Math.min(20, stressScore * 4); 
+    fitAndStressScore = Math.max(20, Math.round(100 - stressPenalty));
+
+    
+    if (analysis.x > printerBed.x - 5 || analysis.y > printerBed.y - 5) {
+      fitAndStressScore -= 5;
+    }
+  }
+
+  
+  let rawScore = Math.round(
+    overhangScore * 0.40 +
+    wallScore * 0.30 +
+    meshScore * 0.15 +
+    fitAndStressScore * 0.15
+  );
+
+  
+  if (overhangScore < 40) {
+    rawScore = Math.min(rawScore, 55); 
+  } else if (overhangScore < 70) {
+    rawScore = Math.min(rawScore, 72); 
+  }
+
+  const score = rawScore;
+
+  
+  let color = "#10b981"; 
+  let statusText = "Ready to Print";
+
+  if (!fitsX || !fitsY || !fitsZ) {
+    color = "#f43f5e"; 
+    statusText = "Exceeds Build Volume";
+  } else if (meshScore < 50) {
+    color = "#f43f5e"; 
+    statusText = "Needs Repair";
+  } else if (overhangScore < 75 || score < 85) {
+    color = "#f59e0b"; 
+    statusText = "Supports / Tweaks Needed";
+  }
+
+  return {
+    score,
+    color,
+    statusText,
+    details: {
+      overhangScore,
+      wallScore,
+      meshScore,
+      fitAndStressScore,
+    },
+  };
+}
+export function ScorePill({ printability }: { printability: ReturnType<typeof calculatePrintabilityScore> }) {
+  if (!printability) return null;
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 20,
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 20,
+        display: "flex",
+        alignItems: "center",
+        gap: "10px",
+        padding: "8px 16px",
+        borderRadius: "980px",
+        background: "rgba(255, 255, 255, 0.92)",
+        backdropFilter: "blur(16px)",
+        boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05)",
+        border: "1px solid var(--card-border)",
+        cursor: "pointer",
+        transition: "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease",
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.transform = "translateX(-50%) scale(1.03)")}
+      onMouseLeave={(e) => (e.currentTarget.style.transform = "translateX(-50%) scale(1)")}
+      title={`Mesh Integrity: ${printability.details.meshScore}%\nOverhangs: ${printability.details.overhangScore}%\nWall Safety: ${printability.details.wallScore}%\nBed/Stress: ${printability.details.fitAndStressScore}%`}
+    >
+      <div
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: "50%",
+          background: printability.color,
+          color: "#fff",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontWeight: 700,
+          fontSize: "13px",
+          boxShadow: `0 0 12px ${printability.color}66`,
+        }}
+      >
+        {printability.score}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", textAlign: "left" }}>
+        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.2 }}>
+          Print Score
+        </span>
+        <span style={{ fontSize: "10px", fontWeight: 600, color: printability.color, lineHeight: 1.2 }}>
+          {printability.statusText}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+
+
+
+
 export function CameraResetController({ resetTrigger }: { resetTrigger: number }) {
   const { camera, controls } = useThree();
   const lastTrigger = useRef(resetTrigger);
@@ -148,7 +278,7 @@ export function CameraResetController({ resetTrigger }: { resetTrigger: number }
     const step = Math.min(1, 10 * delta);
     camera.position.lerp(targetCamPos, step);
 
-    if (controls && "target" in controls) {
+    if (controls && "target" in controls && controls.target) {
       const orbControls = controls as any;
       orbControls.target.lerp(targetLookAt, step);
       orbControls.update();
@@ -158,7 +288,7 @@ export function CameraResetController({ resetTrigger }: { resetTrigger: number }
 
     if (camera.position.distanceTo(targetCamPos) < 0.5) {
       camera.position.copy(targetCamPos);
-      if (controls && "target" in controls) {
+      if (controls && "target" in controls && controls.target) {
         (controls as any).target.copy(targetLookAt);
         (controls as any).update();
       }
@@ -169,7 +299,7 @@ export function CameraResetController({ resetTrigger }: { resetTrigger: number }
   return null;
 }
 
-interface RightWheelPanelProps {
+interface BottomWheelPanelProps {
   printerIdx: number;
   materialIdx: number;
   nozzleIdx: number;
@@ -185,7 +315,7 @@ interface RightWheelPanelProps {
   onInfillChange: (idx: number) => void;
 }
 
-export function RightWheelPanel({
+export function BottomWheelPanel({
   printerIdx,
   materialIdx,
   nozzleIdx,
@@ -199,12 +329,12 @@ export function RightWheelPanel({
   onLayerChange,
   onWallChange,
   onInfillChange,
-}: RightWheelPanelProps) {
+}: BottomWheelPanelProps) {
   return (
     <div
       style={{
         position: "fixed",
-        bottom: 0,
+        bottom: 1,
         left: "50%",
         transform: "translateX(-50%)",
         display: "flex",
@@ -216,70 +346,52 @@ export function RightWheelPanel({
         margin: 0,
       }}
     >
-      <RadialWheel title="Printer" options={PRINTER_OPTIONS} selectedIndex={printerIdx} onChange={onPrinterChange} iconSize={64} />
-      <RadialWheel title="Material" options={MATERIAL_OPTIONS} selectedIndex={materialIdx} onChange={onMaterialChange} iconSize={64} />
-      <RadialWheel title="Nozzle" options={NOZZLE_OPTIONS} selectedIndex={nozzleIdx} onChange={onNozzleChange} />
-      <RadialWheel title="Layer Height" options={layerOptions} selectedIndex={layerIdx < layerOptions.length ? layerIdx : 0} onChange={onLayerChange} />
-      <RadialWheel title="Wall Loops" options={WALL_OPTIONS} selectedIndex={wallIdx} onChange={onWallChange} />
-      <RadialWheel title="Infill Density" options={INFILL_OPTIONS} selectedIndex={infillIdx} onChange={onInfillChange} />
+      <RadialWheel title="Printer" options={PRINTER_OPTIONS} selectedIndex={printerIdx} onChange={onPrinterChange} iconSize={64} autoHide={true} />
+      <RadialWheel title="Material" options={MATERIAL_OPTIONS} selectedIndex={materialIdx} onChange={onMaterialChange} iconSize={64} autoHide={true} />
+      <RadialWheel title="Nozzle" options={NOZZLE_OPTIONS} selectedIndex={nozzleIdx} onChange={onNozzleChange} autoHide={true} />
+      <RadialWheel title="Layer Height" options={layerOptions} selectedIndex={layerIdx < layerOptions.length ? layerIdx : 0} onChange={onLayerChange} autoHide={true} />
+      <RadialWheel title="Wall Loops" options={WALL_OPTIONS} selectedIndex={wallIdx} onChange={onWallChange} autoHide={true} />
+      <RadialWheel title="Infill Density" options={INFILL_OPTIONS} selectedIndex={infillIdx} onChange={onInfillChange} autoHide={true} />
     </div>
   );
 }
 
-interface ElasticUploadPillProps {
-  onFileUpload: (e: any) => void;
-  fileName?: string;
+interface RightPresetWheelProps {
+  presetIdx: number;
+  onPresetChange: (idx: number) => void;
 }
 
-const ElasticUploadPill: React.FC<ElasticUploadPillProps> = ({ onFileUpload, fileName }) => {
-  const [isDragging, setIsDragging] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); };
-  const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); };
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault(); e.stopPropagation(); setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      onFileUpload({ target: { files: e.dataTransfer.files } });
-    }
-  };
+export function RightPresetWheel({ presetIdx, onPresetChange }: RightPresetWheelProps) {
+  const presetOptions = useMemo(() => PRESETS.map((p, idx) => ({ ...p, value: idx })), []);
 
   return (
     <div
-      onClick={() => fileInputRef.current?.click()}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-      className="apple-file-input"
       style={{
-        border: isDragging ? "2px dashed var(--accent-blue)" : "1px solid var(--card-border)",
-        background: isDragging ? "rgba(255, 255, 255, 0.95)" : "rgba(0, 0, 0, 0.02)",
-        transition: "all 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: isDragging ? "18px 12px" : "12px",
+        position: "fixed",
+        right: 0,
+        top: "50%",
+        transform: "translateY(-50%)",
+        zIndex: 50,
       }}
     >
-      <input ref={fileInputRef} type="file" accept=".stl" onChange={onFileUpload} style={{ display: "none" }} />
-      {fileName ? (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, width: "100%" }}>
-          <span className="apple-badge" style={{ background: "rgba(0, 102, 204, 0.1)", color: "var(--accent-blue)" }}>STL</span>
-          <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>{fileName}</span>
-          <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-secondary)" }}>Replace</span>
-        </div>
-      ) : (
-        <>
-          <div style={{ color: "var(--text-primary)", fontWeight: 600, fontSize: "12px" }}>
-            {isDragging ? "Drop STL File Here" : "Upload STL Model"}
-          </div>
-          <span style={{ fontSize: "10px", color: "var(--text-secondary)", marginTop: 2 }}>Drag & drop or click to browse</span>
-        </>
-      )}
+      <RadialWheel
+        title="Slice Presets"
+        options={presetOptions}
+        selectedIndex={presetIdx}
+        onChange={onPresetChange}
+        orientation="right"
+        showCenterText={false}
+        fontSizeSelected="12px"
+        fontSizeUnselected="10px"
+        autoHide={true}
+      />
     </div>
   );
-};
+}
+
+
+
+
 
 export default function App() {
   const [currentModel, setCurrentModel] = useState<any>(null);
@@ -295,11 +407,14 @@ export default function App() {
   const [layerIdx, setLayerIdx] = useState(3);
   const [wallIdx, setWallIdx] = useState(1);
   const [infillIdx, setInfillIdx] = useState(2);
+  const [presetIdx, setPresetIdx] = useState<number>(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const nozzleDiameterMm = NOZZLE_OPTIONS[nozzleIdx].value;
   const currentLayerOptions = LAYER_OPTIONS_BY_NOZZLE[nozzleDiameterMm] || LAYER_OPTIONS_BY_NOZZLE[0.4];
 
-  const activeLayerObj = currentLayerOptions[layerIdx] || currentLayerOptions[0];
+  const safeLayerIdx = Math.min(layerIdx, currentLayerOptions.length - 1);
+  const activeLayerObj = currentLayerOptions[safeLayerIdx] || currentLayerOptions[0];
   const layerHeightMm = activeLayerObj.value;
 
   const wallLoopCount = WALL_OPTIONS[wallIdx].value;
@@ -313,15 +428,40 @@ export default function App() {
   const [resetCounter, setResetCounter] = useState<number>(0);
   const [showHoles, setShowHoles] = useState<boolean>(false);
   const [showBedBounds, setShowBedBounds] = useState<boolean>(true);
-  const [bedSize] = useState<number>(220);
   const [holeAnalysis, setHoleAnalysis] = useState<{ hasHoles: boolean; openEdgeCount: number } | null>(null);
+
+  
+  const currentPrinterBed = PRINTER_OPTIONS[printerIdx].bedSize;
+
+  const printability = useMemo(() => {
+    return calculatePrintabilityScore(analysis, holeAnalysis, currentPrinterBed, nozzleDiameterMm);
+  }, [analysis, holeAnalysis, currentPrinterBed, nozzleDiameterMm]);
+
+  const applyPreset = (idx: number) => {
+    setPresetIdx(idx);
+    const selectedPreset = PRESETS[idx];
+    if (!selectedPreset) return;
+
+    const availableLayerVals = currentLayerOptions.map((opt) => opt.value);
+    const targetLayerHeight = selectedPreset.targetRatio * nozzleDiameterMm;
+    const closestLayerIdx = getClosestIndex(availableLayerVals, targetLayerHeight);
+    setLayerIdx(closestLayerIdx);
+
+    const targetWallIdx = WALL_OPTIONS.findIndex((w) => w.value === selectedPreset.walls);
+    if (targetWallIdx !== -1) setWallIdx(targetWallIdx);
+
+    const targetInfillIdx = INFILL_OPTIONS.findIndex((i) => i.value === selectedPreset.infill);
+    if (targetInfillIdx !== -1) setInfillIdx(targetInfillIdx);
+  };
 
   const handlePrinterChange = (idx: number) => {
     setPrinterIdx(idx);
     const selectedPrinter = PRINTER_OPTIONS[idx];
     if (selectedPrinter?.defaults) {
       handleNozzleChange(selectedPrinter.defaults.nozzle);
-      setLayerIdx(selectedPrinter.defaults.layerHeight);
+      const newNozzleVal = NOZZLE_OPTIONS[selectedPrinter.defaults.nozzle].value;
+      const availableHeights = LAYER_OPTIONS_BY_NOZZLE[newNozzleVal] || LAYER_OPTIONS_BY_NOZZLE[0.4];
+      setLayerIdx(Math.min(selectedPrinter.defaults.layerHeight, availableHeights.length - 1));
       setWallIdx(selectedPrinter.defaults.wallLoops);
       setInfillIdx(selectedPrinter.defaults.infill);
     }
@@ -340,8 +480,14 @@ export default function App() {
     const newNozzleVal = NOZZLE_OPTIONS[newNozzleIdx].value;
     const availableHeights = LAYER_OPTIONS_BY_NOZZLE[newNozzleVal] || LAYER_OPTIONS_BY_NOZZLE[0.4];
 
-    if (layerIdx >= availableHeights.length) {
-      setLayerIdx(Math.floor(availableHeights.length / 2));
+    const targetHeight = newNozzleVal * 0.5;
+    const availableLayerVals = availableHeights.map((opt) => opt.value);
+    setLayerIdx(getClosestIndex(availableLayerVals, targetHeight));
+
+    const recommendedWalls = Math.max(1, Math.round(1.2 / (newNozzleVal * 1.1)));
+    const matchingWallIdx = WALL_OPTIONS.findIndex((w) => w.value === recommendedWalls);
+    if (matchingWallIdx !== -1) {
+      setWallIdx(matchingWallIdx);
     }
   };
 
@@ -351,43 +497,84 @@ export default function App() {
       setFileName(file.name);
       if (currentModel?.objectUrl) URL.revokeObjectURL(currentModel.objectUrl);
       const objectUrl = URL.createObjectURL(file);
-      const ext = file.name.split('.').pop()?.toLowerCase() || 'stl';
+      const ext = file.name.split(".").pop()?.toLowerCase() || "stl";
       setCurrentModel({ objectUrl, format: ext, fileName: file.name });
     }
   };
 
-  React.useEffect(() => {
-    return () => { if (currentModel?.objectUrl) URL.revokeObjectURL(currentModel.objectUrl); };
+  const handleExportSettings = () => {
+    const exportData = {
+      generator: "SlicingLab Configurator",
+      exportedAt: new Date().toISOString(),
+      printer: PRINTER_OPTIONS[printerIdx].label,
+      material: filamentKey,
+      settings: {
+        nozzleDiameterMm,
+        layerHeightMm,
+        wallLoopCount,
+        infillPercent: infill,
+        topLayerCount,
+        bottomLayerCount,
+        spoolPriceUSD: spoolPrice,
+      },
+      analysis: analysis
+        ? {
+            dimensionsMm: { x: Number(analysis.x.toFixed(2)), y: Number(analysis.y.toFixed(2)), z: Number(analysis.z.toFixed(2)) },
+            volumeCm3: Number((analysis.volume / 1000).toFixed(2)),
+            weightGrams: Number(analysis.materialEstimate?.weightGrams.toFixed(2)),
+            estimatedCostUSD: Number(analysis.materialEstimate?.cost.toFixed(2)),
+            printabilityScore: printability?.score ?? null,
+            status: printability?.statusText ?? null,
+          }
+        : null,
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${fileName ? fileName.replace(/\.[^/.]+$/, "") : "print"}_settings.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (currentModel?.objectUrl) URL.revokeObjectURL(currentModel.objectUrl);
+    };
   }, [currentModel]);
 
   const customAxesHelper = useMemo(() => {
-  const group = new THREE.Group();
-  const xGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-150, 0, 0), new THREE.Vector3(150, 0, 0)]);
-  const yGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, -150, 0), new THREE.Vector3(0, 150, 0)]);
-  const zGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 150)]);
+    const group = new THREE.Group();
+    const xGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-150, 0, 0), new THREE.Vector3(150, 0, 0)]);
+    const yGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, -150, 0), new THREE.Vector3(0, 150, 0)]);
+    const zGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 150)]);
 
-  const lineMat = (color: number) =>
-    new THREE.LineBasicMaterial({
-      color,
-      linewidth: 2,
-      depthTest: true,
-      depthWrite: true,
-      polygonOffset: true,
-      polygonOffsetFactor: -1, 
-      polygonOffsetUnits: -1,
-    });
+    const lineMat = (color: number) =>
+      new THREE.LineBasicMaterial({
+        color,
+        linewidth: 2,
+        depthTest: true,
+        depthWrite: true,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      });
 
-  const lineX = new THREE.Line(xGeom, lineMat(0xEF4444));
-  const lineY = new THREE.Line(yGeom, lineMat(0x22C55E));
-  const lineZ = new THREE.Line(zGeom, lineMat(0x3B82F6));
+    const lineX = new THREE.Line(xGeom, lineMat(0xef4444));
+    const lineY = new THREE.Line(yGeom, lineMat(0x22c55e));
+    const lineZ = new THREE.Line(zGeom, lineMat(0x3b82f6));
 
-  group.add(lineX, lineY, lineZ);
-  return group;
-}, []);
+    group.add(lineX, lineY, lineZ);
+    return group;
+  }, []);
 
+  
   const bedBoundsMesh = useMemo(() => {
-    const geometry = new THREE.BoxGeometry(bedSize, bedSize, 250);
-    geometry.translate(0, 0, 125);
+    const { x, y, z } = currentPrinterBed;
+    const geometry = new THREE.BoxGeometry(x, y, z);
+    geometry.translate(0, 0, z / 2);
+    
     const material = new THREE.LineBasicMaterial({
       color: 0x94a3b8,
       transparent: true,
@@ -395,15 +582,20 @@ export default function App() {
       depthWrite: true,
       depthTest: true,
     });
+    
     const lines = new THREE.LineSegments(new THREE.WireframeGeometry(geometry), material);
     lines.renderOrder = -1;
     return lines;
-  }, [bedSize]);
+  }, [currentPrinterBed.x, currentPrinterBed.y, currentPrinterBed.z]);
 
-  const formatDim = (val: number) => useInches ? (val / 25.4).toFixed(2) + " in" : val.toFixed(1) + " mm";
-  const formatVolume = (val: number) => useInches ? (val / 16387).toFixed(2) + " in³" : (val / 1000).toFixed(1) + " cm³";
-  const formatWeight = (est: any) => est ? `${est.weightGrams.toFixed(1)} g` : "0 g";
-  const formatCost = (est: any) => est ? `$${est.cost.toFixed(2)}` : "$0.00";
+  
+  const maxGridSize = Math.max(currentPrinterBed.x, currentPrinterBed.y);
+  const gridDivisions = Math.round(maxGridSize / 10);
+
+  const formatDim = (val: number) => (useInches ? (val / 25.4).toFixed(2) + " in" : val.toFixed(1) + " mm");
+  const formatVolume = (val: number) => (useInches ? (val / 16387).toFixed(2) + " in³" : (val / 1000).toFixed(1) + " cm³");
+  const formatWeight = (est: any) => (est ? `${est.weightGrams.toFixed(1)} g` : "0 g");
+  const formatCost = (est: any) => (est ? `$${est.cost.toFixed(2)}` : "$0.00");
 
   const calculatePrintTime = () => {
     if (!analysis || !analysis.volume) return "0h 0m";
@@ -416,43 +608,52 @@ export default function App() {
 
   return (
     <div style={{ width: "100vw", height: "100vh", position: "relative" }}>
-      <Canvas 
-        shadows 
-        gl={{ logarithmicDepthBuffer: true }} 
-        style={{ background: "var(--bg-canvas)" }} 
-        camera={{ position: [200, -200, 200], fov: 45, near: 0.1, far: 2000 }} 
-        onCreated={({ camera, gl }) => { 
-          gl.setClearColor("#fbfbfa"); 
-          camera.up.set(0, 0, 1); 
-          camera.lookAt(0, 0, 0); 
+      <Canvas
+        shadows
+        gl={{ logarithmicDepthBuffer: true }}
+        style={{ background: "var(--bg-canvas)" }}
+        camera={{ position: [200, -200, 200], fov: 45, near: 0.1, far: 2000 }}
+        onCreated={({ camera, gl }) => {
+          gl.setClearColor("#fbfbfa");
+          camera.up.set(0, 0, 1);
+          camera.lookAt(0, 0, 0);
         }}
       >
         <ambientLight intensity={0.9} />
         <directionalLight position={[100, -100, 150]} intensity={1.5} castShadow />
         <pointLight position={[-50, 50, 50]} intensity={0.4} />
 
-        <gridHelper 
-          args={[300, 30, "#e2e2e0", "#e2e2e0"]} 
-          position={[0, 0, -0.1]} 
-          rotation={[Math.PI / 2, 0, 0]} 
+        {/* Force grid reconstruction on size change using a key */}
+        <gridHelper
+          key={`grid-${maxGridSize}`}
+          args={[maxGridSize, gridDivisions, "#e2e2e0", "#e2e2e0"]}
+          position={[0, 0, -0.1]}
+          rotation={[Math.PI / 2, 0, 0]}
           renderOrder={-1}
         />
+
         <primitive object={customAxesHelper} />
         {showBedBounds && <primitive object={bedBoundsMesh} />}
 
         <Suspense fallback={null}>
           {currentModel && (
             <Model
-              model={currentModel} wireframe={wireframe} fallbackColor="#cbd5e1"
-              infillPercent={infill} spoolPrice={spoolPrice} spoolWeightGrams={1000}
+              model={currentModel}
+              wireframe={wireframe}
+              fallbackColor="#cbd5e1"
+              infillPercent={infill}
+              spoolPrice={spoolPrice}
+              spoolWeightGrams={1000}
               filamentKey={filamentKey}
               nozzleDiameterMm={nozzleDiameterMm}
               layerHeightMm={layerHeightMm}
               wallLoopCount={wallLoopCount}
               topLayerCount={topLayerCount}
               bottomLayerCount={bottomLayerCount}
-              activeHeatmap={activeHeatmap} showHoles={showHoles}
-              onHolesDetected={setHoleAnalysis} onModelAnalyzed={setAnalysis}
+              activeHeatmap={activeHeatmap}
+              showHoles={showHoles}
+              onHolesDetected={setHoleAnalysis}
+              onModelAnalyzed={setAnalysis}
             />
           )}
         </Suspense>
@@ -461,11 +662,15 @@ export default function App() {
         <CameraResetController resetTrigger={resetCounter} />
       </Canvas>
 
-      <RightWheelPanel
+      {/* TOP FLOATING SCORE PILL */}
+      <ScorePill printability={printability} />
+
+      {/* BOTTOM CONTROL WHEELS */}
+      <BottomWheelPanel
         printerIdx={printerIdx}
         materialIdx={materialIdx}
         nozzleIdx={nozzleIdx}
-        layerIdx={layerIdx}
+        layerIdx={safeLayerIdx}
         layerOptions={currentLayerOptions}
         wallIdx={wallIdx}
         infillIdx={infillIdx}
@@ -477,86 +682,239 @@ export default function App() {
         onInfillChange={setInfillIdx}
       />
 
+      {/* RIGHT PRESET WHEEL */}
+      <RightPresetWheel presetIdx={presetIdx} onPresetChange={applyPreset} />
+
+      {/* UPLOAD BUTTON */}
+      <div style={{ position: "absolute", top: 20, left: 20, zIndex: 10 }}>
+        <input type="file" ref={fileInputRef} accept=".stl" onChange={handleFileUpload} style={{ display: "none" }} />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
+          onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: "50%",
+            background: "rgba(255, 255, 255, 0.95)",
+            backdropFilter: "blur(12px)",
+            boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
+            border: "1px solid var(--card-border)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            transition: "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease",
+          }}
+          title="Upload STL Model"
+        >
+          <svg style={{ width: 20, height: 20, color: "var(--text-primary)" }} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+          </svg>
+        </button>
+        {fileName && (
+          <div style={{ position: "absolute", top: 0, left: 60, fontSize: "10px", fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap", background: "rgba(255, 255, 255, 0.9)", backdropFilter: "blur(8px)", padding: "6px 10px", borderRadius: 8, boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", border: "1px solid var(--card-border)" }}>
+            {fileName}
+          </div>
+        )}
+      </div>
+
+      {/* TOP RIGHT HEATMAP & TOGGLE CONTROLS */}
       {currentModel && (
-        <div style={{ position: "absolute", top: 20, right: 20, zIndex: 10, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+        <div style={{ position: "absolute", top: 20, right: 20, zIndex: 10, display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {holeAnalysis && (
+              <div style={{ background: holeAnalysis.hasHoles ? "rgba(225, 29, 72, 0.1)" : "rgba(16, 185, 129, 0.1)", color: holeAnalysis.hasHoles ? "#e11d48" : "#059669", padding: "6px 12px", borderRadius: 980, fontSize: "11px", fontWeight: 600, border: "1px solid var(--card-border)" }}>
+                {holeAnalysis.hasHoles ? `⚠ ${holeAnalysis.openEdgeCount} open edge(s)` : "✓ Watertight"}
+              </div>
+            )}
+          </div>
+
           <div style={{ display: "flex", gap: 8 }}>
-            <button 
-              className="apple-badge" 
-              onClick={() => setShowBedBounds(!showBedBounds)} 
-              style={{ cursor: "pointer", border: "1px solid var(--card-border)", background: showBedBounds ? "var(--text-primary)" : "var(--card-bg)", color: showBedBounds ? "#fff" : "var(--text-primary)" }}
+            {HEATMAP_MODES.map(({ key, label }) => {
+              const isActive = activeHeatmap === key;
+              const shortLabel = key === "none" ? "OFF" : key === "overhang" ? "OVH" : key === "stress" ? "STR" : "THN";
+
+              let bgGradient = "rgba(255, 255, 255, 0.95)";
+              let textColor = "var(--text-primary)";
+              let shadowStyle = "0 4px 12px rgba(0, 0, 0, 0.05)";
+
+              if (isActive) {
+                textColor = "#fff";
+                shadowStyle = "0 6px 16px rgba(0, 0, 0, 0.15)";
+                if (key === "none") bgGradient = "linear-gradient(135deg, #334155 0%, #0f172a 100%)";
+                else if (key === "overhang") bgGradient = "linear-gradient(180deg, #38bdf8 0%, #2563eb 100%)";
+                else if (key === "stress") bgGradient = "linear-gradient(180deg, #facc15 0%, #ea580c 100%)";
+                else if (key === "thinWall") bgGradient = "linear-gradient(180deg, #f43f5e 0%, #be123c 100%)";
+              }
+
+              return (
+                <button
+                  key={key}
+                  onClick={() => setActiveHeatmap(key as any)}
+                  onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+                  style={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: "50%",
+                    background: bgGradient,
+                    color: textColor,
+                    backdropFilter: "blur(12px)",
+                    boxShadow: shadowStyle,
+                    border: "1px solid var(--card-border)",
+                    fontSize: "10px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    transition: "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease, color 0.2s ease",
+                  }}
+                  title={`Heatmap: ${label}`}
+                >
+                  {shortLabel}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={() => setShowBedBounds(!showBedBounds)}
+              onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.04)")}
+              onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+              style={{
+                height: 38,
+                padding: "0 16px",
+                borderRadius: 980,
+                fontSize: "12px",
+                fontWeight: 600,
+                letterSpacing: "-0.01em",
+                cursor: "pointer",
+                backdropFilter: "blur(12px)",
+                boxShadow: "0 4px 12px rgba(0, 0, 0, 0.05)",
+                border: "1px solid var(--card-border)",
+                background: showBedBounds ? "var(--accent-blue)" : "rgba(255, 255, 255, 0.95)",
+                color: showBedBounds ? "#fff" : "var(--text-primary)",
+                transition: "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease, color 0.2s ease",
+              }}
             >
               {showBedBounds ? "Hide Build Volume" : "Show Build Volume"}
             </button>
-            <button 
-              className="apple-badge" 
-              onClick={() => setShowHoles(!showHoles)} 
-              style={{ cursor: "pointer", border: "1px solid var(--card-border)", background: showHoles ? "#e11d48" : "var(--card-bg)", color: showHoles ? "#fff" : "var(--text-primary)" }}
+
+            <button
+              onClick={() => setShowHoles(!showHoles)}
+              onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.04)")}
+              onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+              style={{
+                height: 38,
+                padding: "0 16px",
+                borderRadius: 980,
+                fontSize: "12px",
+                fontWeight: 600,
+                letterSpacing: "-0.01em",
+                cursor: "pointer",
+                backdropFilter: "blur(12px)",
+                boxShadow: "0 4px 12px rgba(0, 0, 0, 0.05)",
+                border: "1px solid var(--card-border)",
+                background: showHoles ? "#e11d48" : "rgba(255, 255, 255, 0.95)",
+                color: showHoles ? "#fff" : "var(--text-primary)",
+                transition: "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease, color 0.2s ease",
+              }}
             >
               {showHoles ? "Hide Hole Check" : "Check for Holes"}
             </button>
           </div>
-          {holeAnalysis && (
-            <div style={{ background: holeAnalysis.hasHoles ? "rgba(225, 29, 72, 0.1)" : "rgba(16, 185, 129, 0.1)", color: holeAnalysis.hasHoles ? "#e11d48" : "#059669", padding: "6px 12px", borderRadius: 980, fontSize: "11px", fontWeight: 600 }}>
-              {holeAnalysis.hasHoles ? `⚠ ${holeAnalysis.openEdgeCount} open edge(s) found` : "✓ Watertight, no holes"}
-            </div>
-          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
+            <button
+              onClick={() => setResetCounter((c) => c + 1)}
+              onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
+              onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: "50%",
+                background: "rgba(255, 255, 255, 0.95)",
+                backdropFilter: "blur(12px)",
+                boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1)",
+                border: "1px solid var(--card-border)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                color: "var(--text-primary)",
+                transition: "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)",
+              }}
+              title="Reset View"
+            >
+              <svg style={{ width: 20, height: 20 }} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+              </svg>
+            </button>
+
+            <button
+              onClick={() => setWireframe(!wireframe)}
+              onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
+              onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: "50%",
+                background: wireframe ? "var(--accent-blue)" : "rgba(255, 255, 255, 0.95)",
+                backdropFilter: "blur(12px)",
+                boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1)",
+                border: "1px solid var(--card-border)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                color: wireframe ? "#fff" : "var(--text-primary)",
+                transition: "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease, color 0.2s ease",
+              }}
+              title="Toggle Wireframe Overlay"
+            >
+              <svg style={{ width: 20, height: 20 }} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+              </svg>
+            </button>
+
+            <button
+              onClick={() => setUseInches(!useInches)}
+              onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
+              onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: "50%",
+                background: useInches ? "var(--accent-blue)" : "rgba(255, 255, 255, 0.95)",
+                backdropFilter: "blur(12px)",
+                boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1)",
+                border: "1px solid var(--card-border)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                fontSize: "11px",
+                fontWeight: 700,
+                color: useInches ? "#fff" : "var(--text-primary)",
+                transition: "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease, color 0.2s ease",
+              }}
+              title="Toggle Units (MM/IN)"
+            >
+              {useInches ? "IN" : "MM"}
+            </button>
+          </div>
         </div>
       )}
 
-      <div className="sidebar-container" style={{ position: "absolute", top: 20, left: 20, zIndex: 10 }}>
-        <div className="printwise-header">
-          PRINTWISE
-        </div>
-
-        <div className="apple-card">
-          <div className="card-title">Workspace Setup</div>
-          <ElasticUploadPill onFileUpload={handleFileUpload} fileName={fileName} />
-          
-          <button className="apple-btn-primary" onClick={() => setResetCounter(c => c + 1)}>
-            Reset View
-          </button>
-          
-          <label className="apple-checkbox-container">
-            <input type="checkbox" checked={wireframe} onChange={(e) => setWireframe(e.target.checked)} />
-            Wireframe Overlay
-          </label>
-        </div>
-
+      {/* LEFT SIDEBAR: METRICS & EXPORT */}
+      <div className="sidebar-container" style={{ position: "absolute", top: 88, left: 20, zIndex: 10 }}>
         <div className="apple-card">
           <div className="card-title">
             <span>Analysis & Slicing</span>
-            <button 
-              onClick={() => setUseInches(!useInches)} 
-              className="apple-badge" 
-              style={{ cursor: "pointer", border: "1px solid var(--card-border)" }}
-            >
-              Unit: {useInches ? "IN" : "MM"}
-            </button>
           </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <span className="field-label">Heatmap Diagnostic</span>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-              {(["none", "overhang", "stress", "thinWall"] as const).map((mode) => (
-                <button 
-                  key={mode} 
-                  onClick={() => setActiveHeatmap(mode)} 
-                  className="apple-badge"
-                  style={{ 
-                    cursor: "pointer", 
-                    textAlign: "center",
-                    border: "1px solid var(--card-border)", 
-                    background: activeHeatmap === mode ? "var(--accent-primary)" : "var(--badge-bg)", 
-                    color: activeHeatmap === mode ? "#fff" : "var(--text-primary)" 
-                  }}
-                >
-                  {mode === "thinWall" ? "Thin Walls" : mode}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <hr className="apple-divider" />
 
           {analysis ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -581,6 +939,35 @@ export default function App() {
                 </div>
                 <input type="range" min="10" max="60" step="1" value={spoolPrice} onChange={(e) => setSpoolPrice(Number(e.target.value))} className="apple-slider" />
               </div>
+
+              <button
+                onClick={handleExportSettings}
+                onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.02)")}
+                onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+                style={{
+                  width: "100%",
+                  height: 40,
+                  borderRadius: 12,
+                  border: "none",
+                  background: "var(--accent-blue)",
+                  color: "#fff",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  marginTop: 4,
+                  boxShadow: "0 4px 12px rgba(0, 102, 204, 0.25)",
+                  transition: "transform 0.2s ease, background 0.2s ease",
+                }}
+              >
+                <svg style={{ width: 16, height: 16 }} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Export Print Profile (.json)
+              </button>
             </div>
           ) : (
             <div style={{ fontSize: "12px", color: "var(--text-secondary)", textAlign: "center", padding: "12px 0", fontWeight: 500 }}>

@@ -51,14 +51,14 @@ function deriveAverageThicknessMm(
 const computeZStressTexture = (geometry: THREE.BufferGeometry, slices = 64) => {
   geometry.computeBoundingBox();
   const bbox = geometry.boundingBox;
-  if (!bbox) return new THREE.DataTexture(new Float32Array(4), 1, 1);
+  if (!bbox) return { texture: new THREE.DataTexture(new Float32Array(4), 1, 1), maxStressRatio: 0 };
 
   const minZ = bbox.min.z;
   const maxZ = bbox.max.z;
   const rangeZ = Math.max(maxZ - minZ, 0.001);
 
   const pos = geometry.attributes.position;
-  if (!pos) return new THREE.DataTexture(new Float32Array(4), 1, 1);
+  if (!pos) return { texture: new THREE.DataTexture(new Float32Array(4), 1, 1), maxStressRatio: 0 };
 
   const sliceAreas = new Float32Array(slices);
   const massAbove = new Float32Array(slices);
@@ -112,7 +112,8 @@ const computeZStressTexture = (geometry: THREE.BufferGeometry, slices = 64) => {
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.needsUpdate = true;
-  return texture;
+
+  return { texture, maxStressRatio: maxStress };
 };
 
 export default function Model({
@@ -194,12 +195,98 @@ export default function Model({
   const bounds = geometry.boundingBox!;
   const dimensions = useMemo(() => new THREE.Vector3().subVectors(bounds.max, bounds.min), [bounds]);
 
+  const { texture: stressTexture, maxStressRatio } = useMemo(
+    () => computeZStressTexture(geometry, 64),
+    [geometry]
+  );
+
+  const { thinWallAttribute, thinWallCount } = useMemo(() => {
+    if (!geometry.boundsTree) return { thinWallAttribute: null, thinWallCount: 0 };
+
+    const pos = geometry.attributes.position;
+    const norms = geometry.attributes.normal;
+    const isThin = new Float32Array(pos.count);
+    let thinCount = 0;
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.firstHitOnly = true;
+
+    const rayMesh = new THREE.Mesh(
+      geometry,
+      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })
+    );
+    rayMesh.updateMatrixWorld(true);
+
+    const normalMatrix = new THREE.Matrix3().getNormalMatrix(rayMesh.matrixWorld);
+
+    const origin = new THREE.Vector3();
+    const direction = new THREE.Vector3();
+    const normal = new THREE.Vector3();
+    const hitNormal = new THREE.Vector3();
+
+    const maxSearchDistance = nozzleDiameterMm * 3.0;
+
+    for (let i = 0; i < pos.count; i++) {
+      origin.fromBufferAttribute(pos, i);
+      normal.fromBufferAttribute(norms, i).normalize();
+
+      direction.copy(normal).negate();
+
+      const epsilon = Math.min(nozzleDiameterMm * 0.05, 0.01);
+      origin.addScaledVector(direction, epsilon);
+
+      raycaster.set(origin, direction);
+      raycaster.near = 0.0001;
+      raycaster.far = maxSearchDistance;
+
+      const intersects = raycaster.intersectObject(rayMesh, false);
+
+      if (intersects.length > 0) {
+        const hit = intersects[0];
+        const measuredThickness = hit.distance + epsilon;
+
+        let validOpposingFace = true;
+        if (hit.face) {
+          hitNormal.copy(hit.face.normal).applyMatrix3(normalMatrix).normalize();
+          if (hitNormal.dot(normal) > 0.2) {
+            validOpposingFace = false;
+          }
+        }
+
+        if (validOpposingFace && measuredThickness < nozzleDiameterMm) {
+          isThin[i] = 1.0;
+          thinCount++;
+        } else {
+          isThin[i] = 0.0;
+        }
+      } else {
+        isThin[i] = 0.0;
+      }
+    }
+
+    return {
+      thinWallAttribute: new THREE.BufferAttribute(isThin, 1),
+      thinWallCount: thinCount,
+    };
+  }, [geometry, nozzleDiameterMm]);
+
+  useEffect(() => {
+    if (activeHeatmap === "thinWall" && thinWallAttribute) {
+      geometry.setAttribute("aIsThin", thinWallAttribute);
+      geometry.attributes.aIsThin.needsUpdate = true;
+    } else if (geometry.hasAttribute("aIsThin")) {
+      geometry.deleteAttribute("aIsThin");
+    }
+  }, [activeHeatmap, thinWallAttribute, geometry]);
+
   useEffect(() => {
     if (!geometry) return;
 
     let volumeMm3 = 0;
     let surfaceAreaMm2 = 0;
+    let overhangAreaMm2 = 0;
     const positions = geometry.attributes.position.array;
+    const normals = geometry.attributes.normal?.array;
 
     const p1 = new THREE.Vector3();
     const p2 = new THREE.Vector3();
@@ -207,6 +294,7 @@ export default function Model({
     const ab = new THREE.Vector3();
     const ac = new THREE.Vector3();
     const cross = new THREE.Vector3();
+    const gravity = new THREE.Vector3(0, 0, -1);
 
     for (let i = 0; i < positions.length; i += 9) {
       p1.fromArray(positions, i);
@@ -217,7 +305,21 @@ export default function Model({
 
       ab.subVectors(p2, p1);
       ac.subVectors(p3, p1);
-      surfaceAreaMm2 += cross.crossVectors(ab, ac).length() / 2.0;
+      const triArea = cross.crossVectors(ab, ac).length() / 2.0;
+      surfaceAreaMm2 += triArea;
+
+      if (normals) {
+        const nX = (normals[i] + normals[i + 3] + normals[i + 6]) / 3;
+        const nY = (normals[i + 1] + normals[i + 4] + normals[i + 7]) / 3;
+        const nZ = (normals[i + 2] + normals[i + 5] + normals[i + 8]) / 3;
+        const normVec = new THREE.Vector3(nX, nY, nZ).normalize();
+
+        const dotDown = normVec.dot(gravity);
+        const overhangAngle = Math.asin(Math.min(Math.max(-dotDown, -1.0), 1.0)) * (180 / Math.PI);
+        if (overhangAngle > 45) {
+          overhangAreaMm2 += triArea;
+        }
+      }
     }
     volumeMm3 = Math.abs(volumeMm3);
 
@@ -248,6 +350,30 @@ export default function Model({
     const weightGrams = shellWeightGrams + infillWeightGrams;
     const cost = (weightGrams / spoolWeightGrams) * spoolPrice;
 
+    const needsSupports = overhangAreaMm2 > surfaceAreaMm2 * 0.05;
+
+    let layerMultiplier = 0.5;
+    if (nozzleDiameterMm <= 0.25) layerMultiplier = 0.35;
+    else if (nozzleDiameterMm >= 0.8) layerMultiplier = 0.6;
+
+    if (complexityRatio > 0.4) layerMultiplier -= 0.05;
+
+    const recLayerHeightMm = Number(Math.max(0.04, nozzleDiameterMm * layerMultiplier).toFixed(2));
+    const baseWallCount = Math.max(1, Math.round(1.2 / (nozzleDiameterMm * 1.1)));
+
+    const recWallLoopCount = complexityRatio > 0.35 || maxStressRatio > 3.0
+      ? baseWallCount + 1
+      : baseWallCount;
+
+    let recInfillPercent = 15;
+    if (maxStressRatio > 3.5) {
+      recInfillPercent = 25;
+    } else if (complexityRatio > 0.5) {
+      recInfillPercent = 10;
+    }
+
+    const totalVertices = geometry.attributes.position.count;
+
     onModelAnalyzed({
       x: dimensions.x,
       y: dimensions.y,
@@ -257,6 +383,24 @@ export default function Model({
       triangles: positions.length / 9,
       shellThicknessMm: avgShellThicknessMm,
       materialEstimate: { weightGrams, cost, shellWeightGrams, infillWeightGrams },
+      heatmapMetrics: {
+        overhangRatio: surfaceAreaMm2 > 0 ? overhangAreaMm2 / surfaceAreaMm2 : 0,
+        stressScore: maxStressRatio,
+        thinWallRatio: totalVertices > 0 ? thinWallCount / totalVertices : 0,
+        complexityRatio,
+      },
+      recommendations: {
+        supportsRequired: needsSupports,
+        wallLoopCount: recWallLoopCount,
+        infillPercent: recInfillPercent,
+        layerHeightMm: recLayerHeightMm,
+        nozzleDiameterMm: nozzleDiameterMm,
+        reasoning: {
+          overhangRatio: surfaceAreaMm2 > 0 ? (overhangAreaMm2 / surfaceAreaMm2).toFixed(3) : 0,
+          complexityRatio: complexityRatio.toFixed(3),
+          structuralStressScore: maxStressRatio.toFixed(2),
+        },
+      },
     });
   }, [
     geometry,
@@ -271,6 +415,8 @@ export default function Model({
     wallLoopCount,
     topLayerCount,
     bottomLayerCount,
+    maxStressRatio,
+    thinWallCount,
   ]);
 
   useEffect(() => {
@@ -318,80 +464,6 @@ export default function Model({
     onHolesDetected({ hasHoles: openEdges > 0, openEdgeCount: openEdges });
   }, [showHoles, geometry, onHolesDetected]);
 
-  const thinWallColors = useMemo(() => {
-    if (activeHeatmap !== "thinWall" || !geometry.boundsTree) return null;
-
-    const pos = geometry.attributes.position;
-    const norms = geometry.attributes.normal;
-    const colors = new Float32Array(pos.count * 3);
-
-    const raycaster = new THREE.Raycaster();
-    raycaster.firstHitOnly = true;
-    raycaster.near = 0.0001;
-
-    const thinThresholdMm = nozzleDiameterMm * 1.5;
-    raycaster.far = thinThresholdMm;
-
-    const rayMesh = new THREE.Mesh(
-      geometry,
-      new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })
-    );
-    rayMesh.updateMatrixWorld(true);
-
-    const normalMatrix = new THREE.Matrix3().getNormalMatrix(rayMesh.matrixWorld);
-
-    const origin = new THREE.Vector3();
-    const direction = new THREE.Vector3();
-    const normal = new THREE.Vector3();
-    const hitNormal = new THREE.Vector3();
-
-    for (let i = 0; i < pos.count; i++) {
-      origin.fromBufferAttribute(pos, i);
-      normal.fromBufferAttribute(norms, i).normalize();
-
-      direction.copy(normal).negate();
-      origin.addScaledVector(direction, 0.001);
-
-      raycaster.set(origin, direction);
-
-      const intersects = raycaster.intersectObject(rayMesh, false);
-
-      if (intersects.length > 0) {
-        const hit = intersects[0];
-        const totalThickness = hit.distance + 0.001;
-
-        let isOpposingWall = true;
-
-        if (hit.face) {
-          hitNormal.copy(hit.face.normal).applyMatrix3(normalMatrix).normalize();
-
-          if (hitNormal.dot(direction) > 0.5) {
-            isOpposingWall = false;
-          }
-        }
-
-        if (isOpposingWall && totalThickness <= thinThresholdMm) {
-          colors[i * 3] = 1.0;
-          colors[i * 3 + 1] = 0.2;
-          colors[i * 3 + 2] = 0.2;
-        } else {
-          colors[i * 3] = 0.2;
-          colors[i * 3 + 1] = 0.8;
-          colors[i * 3 + 2] = 0.4;
-        }
-      } else {
-        colors[i * 3] = 0.2;
-        colors[i * 3 + 1] = 0.8;
-        colors[i * 3 + 2] = 0.4;
-      }
-    }
-
-    return new THREE.BufferAttribute(colors, 3);
-  }, [activeHeatmap, geometry, nozzleDiameterMm]);
-
-  const stressTexture = useMemo(() => computeZStressTexture(geometry, 64), [geometry]);
-  
-
   const materials = useMemo(() => {
     const standard = new THREE.MeshStandardMaterial({
       color: fallbackColor,
@@ -404,141 +476,167 @@ export default function Model({
       transparent: false,
     });
 
-const overhang = new THREE.ShaderMaterial({
-  vertexShader: `
-    #include <common>
-    #include <logdepthbuf_pars_vertex>
+    const overhang = new THREE.ShaderMaterial({
+      uniforms: {
+        minZ: { value: bounds.min.z },
+        maxZ: { value: bounds.max.z },
+      },
+      vertexShader: `
+        #include <common>
+        #include <logdepthbuf_pars_vertex>
 
-    varying vec3 vWorldNormal;
-    varying vec3 vWorldPosition;
+        varying vec3 vWorldNormal;
+        varying vec3 vWorldPosition;
 
-    void main() {
-      vWorldNormal = normalize(normalMatrix * normal);
-      vec4 worldPos = modelMatrix * vec4(position, 1.0);
-      vWorldPosition = worldPos.xyz;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        void main() {
+          vWorldNormal = normalize(mat3(modelMatrix) * normal);
+          vec4 worldPos = modelMatrix * vec4(position, 1.0);
+          vWorldPosition = worldPos.xyz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 
-      #include <logdepthbuf_vertex>
-    }
-  `,
-  fragmentShader: `
-    #include <common>
-    #include <logdepthbuf_pars_fragment>
-
-    varying vec3 vWorldNormal;
-    varying vec3 vWorldPosition;
-
-    void main() {
-      #include <logdepthbuf_fragment>
-
-      vec3 n = normalize(vWorldNormal);
-      vec3 bedDown = vec3(0.0, 0.0, -1.0);
-      float dotDown = dot(n, bedDown);
-      bool isOnBed = vWorldPosition.z <= 0.2;
-      vec3 color;
-      if (isOnBed && dotDown > 0.8) {
-        color = vec3(0.0, 0.4, 1.0); 
-      } else if (dotDown <= 0.0) {
-        color = vec3(0.0, 0.4, 1.0); 
-      } else {
-        float overhangAngle = degrees(asin(clamp(dotDown, 0.0, 1.0)));
-        if (overhangAngle <= 45.0) {
-          color = vec3(0.0, 0.4, 1.0); 
-        } else if (overhangAngle <= 68.0) {
-          color = vec3(1.0, 0.8, 0.0); 
-        } else {
-          color = vec3(1.0, 0.1, 0.1); 
+          #include <logdepthbuf_vertex>
         }
-      }
-      gl_FragColor = vec4(color, 1.0);
-    }
-  `,
-  wireframe: wireframe,
-  depthWrite: true,
-  depthTest: true,
-  transparent: false,
-  side: THREE.FrontSide,
-});
+      `,
+      fragmentShader: `
+        #include <common>
+        #include <logdepthbuf_pars_fragment>
 
-const stress = new THREE.ShaderMaterial({
-  uniforms: {
-    minZ: { value: bounds.min.z },
-    maxZ: { value: bounds.max.z },
-    uStressTex: { value: stressTexture },
-  },
-  vertexShader: `
-    
-    #include <common>
-    #include <logdepthbuf_pars_vertex>
-    
-    varying vec3 vWorldPosition;
-    
-    void main() {
-      vec4 worldPos = modelMatrix * vec4(position, 1.0);
-      vWorldPosition = worldPos.xyz;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      
-      
-      #include <logdepthbuf_vertex>
-    }
-  `,
-  fragmentShader: `
-    
-    #include <common>
-    #include <logdepthbuf_pars_fragment>
-    
-    uniform float minZ;
-    uniform float maxZ;
-    uniform sampler2D uStressTex;
-    varying vec3 vWorldPosition;
-    
-    void main() {
-      
-      #include <logdepthbuf_fragment>
-      
-      float heightRatio = (maxZ - minZ) > 0.0 ? (vWorldPosition.z - minZ) / (maxZ - minZ) : 0.0;
-      float t = clamp(heightRatio, 0.001, 0.999);
-      
-      float stress = texture2D(uStressTex, vec2(t, 0.5)).r;
-      
-      vec3 color;
-      if (stress < 0.5) {
-        color = mix(vec3(0.0, 0.4, 1.0), vec3(1.0, 0.9, 0.0), stress * 2.0);
-      } else {
-        color = mix(vec3(1.0, 0.9, 0.0), vec3(1.0, 0.1, 0.1), (stress - 0.5) * 2.0);
-      }
-      
-      gl_FragColor = vec4(color, 1.0);
-    }
-  `,
-  wireframe: wireframe,
-  side: THREE.FrontSide,
-  depthTest: true,
-  depthWrite: true,
-  transparent: false,
-});
+        uniform float minZ;
+        uniform float maxZ;
+        varying vec3 vWorldNormal;
+        varying vec3 vWorldPosition;
 
-    const thinWall = new THREE.MeshStandardMaterial({
-      vertexColors: true,
+        void main() {
+          #include <logdepthbuf_fragment>
+
+          vec3 n = normalize(vWorldNormal);
+          vec3 gravity = vec3(0.0, 0.0, -1.0);
+          float dotDown = dot(n, gravity);
+          vec3 color;
+
+          float heightRange = maxZ - minZ;
+          float relativeHeight = heightRange > 0.0 ? (vWorldPosition.z - minZ) / heightRange : 0.0;
+
+          if (relativeHeight <= 0.05 && n.z > -0.6) {
+            color = vec3(0.0, 0.4, 1.0); 
+          } else {
+            float overhangAngle = degrees(asin(clamp(-dotDown, -1.0, 1.0)));
+            
+            if (overhangAngle <= 45.0) {
+              color = vec3(0.0, 0.4, 1.0); 
+            } else if (overhangAngle <= 68.1) {
+              color = vec3(1.0, 0.8, 0.0); 
+            } else {
+              color = vec3(1.0, 0.1, 0.1); 
+            }
+          }
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `,
       wireframe: wireframe,
-      roughness: 0.4,
-      metalness: 0.1,
       depthWrite: true,
       depthTest: true,
       transparent: false,
+      side: THREE.FrontSide,
+    });
+
+    const stress = new THREE.ShaderMaterial({
+      uniforms: {
+        minZ: { value: bounds.min.z },
+        maxZ: { value: bounds.max.z },
+        uStressTex: { value: stressTexture },
+      },
+      vertexShader: `
+        #include <common>
+        #include <logdepthbuf_pars_vertex>
+        
+        varying vec3 vWorldPosition;
+        
+        void main() {
+          vec4 worldPos = modelMatrix * vec4(position, 1.0);
+          vWorldPosition = worldPos.xyz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          
+          #include <logdepthbuf_vertex>
+        }
+      `,
+      fragmentShader: `
+        #include <common>
+        #include <logdepthbuf_pars_fragment>
+        
+        uniform float minZ;
+        uniform float maxZ;
+        uniform sampler2D uStressTex;
+        varying vec3 vWorldPosition;
+        
+        void main() {
+          #include <logdepthbuf_fragment>
+          
+          float heightRatio = (maxZ - minZ) > 0.0 ? (vWorldPosition.z - minZ) / (maxZ - minZ) : 0.0;
+          float t = clamp(heightRatio, 0.001, 0.999);
+          
+          float stress = texture2D(uStressTex, vec2(t, 0.5)).r;
+          
+          vec3 color;
+          if (stress < 0.5) {
+            color = mix(vec3(0.0, 0.4, 1.0), vec3(1.0, 0.9, 0.0), stress * 2.0);
+          } else {
+            color = mix(vec3(1.0, 0.9, 0.0), vec3(1.0, 0.1, 0.1), (stress - 0.5) * 2.0);
+          }
+          
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `,
+      wireframe: wireframe,
+      side: THREE.FrontSide,
+      depthTest: true,
+      depthWrite: true,
+      transparent: false,
+    });
+
+    const thinWall = new THREE.ShaderMaterial({
+      vertexShader: `
+        #include <common>
+        #include <logdepthbuf_pars_vertex>
+
+        attribute float aIsThin;
+        varying float vIsThin;
+
+        void main() {
+          vIsThin = aIsThin;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+
+          #include <logdepthbuf_vertex>
+        }
+      `,
+      fragmentShader: `
+        #include <common>
+        #include <logdepthbuf_pars_fragment>
+
+        varying float vIsThin;
+
+        void main() {
+          #include <logdepthbuf_fragment>
+
+          vec3 color;
+          if (vIsThin > 0.5) {
+            color = vec3(1.0, 0.0, 0.0);
+          } else {
+            color = vec3(0.0, 0.8, 0.3);
+          }
+
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `,
+      wireframe: wireframe,
+      depthWrite: true,
+      depthTest: true,
+      transparent: false,
+      side: THREE.FrontSide,
     });
 
     return { standard, overhang, stress, thinWall };
   }, [fallbackColor, wireframe, bounds, stressTexture]);
-
-  useEffect(() => {
-    if (activeHeatmap === "thinWall" && thinWallColors) {
-      geometry.setAttribute("color", thinWallColors);
-      geometry.attributes.color.needsUpdate = true;
-    } else if (geometry.hasAttribute("color")) {
-      geometry.deleteAttribute("color");
-    }
-  }, [activeHeatmap, thinWallColors, geometry]);
 
   let activeMat: THREE.Material = materials.standard;
 
@@ -556,4 +654,4 @@ const stress = new THREE.ShaderMaterial({
       renderOrder={1}
     />
   );
-} 
+}

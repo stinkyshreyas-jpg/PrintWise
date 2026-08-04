@@ -15,6 +15,12 @@ interface RadialWheelProps {
   offsetX?: number;
   offsetY?: number;
   iconSize?: number;
+  orientation?: "bottom" | "right";
+  showCenterText?: boolean;
+  fontSizeSelected?: string;
+  fontSizeUnselected?: string;
+  autoHide?: boolean;
+  popDuration?: number; 
 }
 
 export default function RadialWheel({
@@ -26,10 +32,19 @@ export default function RadialWheel({
   offsetX = 0,
   offsetY = 0,
   iconSize = 20,
+  orientation = "bottom",
+  showCenterText = true,
+  fontSizeSelected = "18px",
+  fontSizeUnselected = "14px",
+  autoHide = false,
+  popDuration = 750,
 }: RadialWheelProps) {
+  const isRight = orientation === "right";
+
   const wheelAreaRef = useRef<HTMLDivElement>(null);
   const isCooldown = useRef(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [isAutoPopped, setIsAutoPopped] = useState(false);
 
   const [rotationDeg, setRotationDeg] = useState(0);
 
@@ -42,11 +57,37 @@ export default function RadialWheel({
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
+  
+ 
+
   const radius = size / 2;
   const innerRadius = radius * 0.3;
   const labelRadius = (radius + innerRadius) / 2;
   const totalOptions = options.length;
   const sliceAngle = 360 / totalOptions;
+
+   
+const isFirstRender = useRef(true);
+
+
+const currentSelectedValue = options[selectedIndex]?.value ?? options[selectedIndex]?.label;
+
+useEffect(() => {
+  
+  if (isFirstRender.current) {
+    isFirstRender.current = false;
+    return;
+  }
+
+  
+  setIsAutoPopped(true);
+
+  const timer = setTimeout(() => {
+    setIsAutoPopped(false);
+  }, popDuration);
+
+  return () => clearTimeout(timer);
+}, [selectedIndex, currentSelectedValue, options, popDuration]);
 
   useEffect(() => {
     setRotationDeg((prevRot) => {
@@ -128,20 +169,44 @@ export default function RadialWheel({
     onChange(i);
   };
 
+  const centerTextY = isRight ? radius : radius - innerRadius / 2.3;
+  const centerTextX = isRight ? radius + innerRadius / 2.3 : radius;
+
+  
+  const isVisible = isHovered || isAutoPopped;
+
+  const getTransform = () => {
+    const baseTranslate = `translate(${offsetX}px, ${offsetY}px)`;
+    const scale = `scale(${isVisible ? 1.05 : 1})`;
+
+    if (!autoHide) {
+      return `${baseTranslate} ${scale}`;
+    }
+
+    if (isRight) {
+      const slideX = isVisible ? "10px" : `${radius+10}px`;
+      return `${baseTranslate} translateX(${slideX}) ${scale}`;
+    } else {
+      const slideY = isVisible ? "10px" : `${radius+10}px`;
+      return `${baseTranslate} translateY(${slideY}) ${scale}`;
+    }
+  };
+
   return (
     <div
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       style={{
         display: "flex",
-        flexDirection: "column",
+        flexDirection: isRight ? "row" : "column",
         alignItems: "center",
         justifyContent: "flex-end",
         position: "relative",
-        transform: `translate(${offsetX}px, ${offsetY}px) scale(${isHovered ? 1.06 : 1})`,
-        transformOrigin: "bottom center",
-        transition: "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
-        zIndex: isHovered ? 10 : 1,
+        transform: getTransform(),
+        transformOrigin: isRight ? "right center" : "bottom center",
+        transition: "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1)",
+        zIndex: isVisible ? 20 : 1,
+        padding: "8px",
       }}
     >
       <span
@@ -150,9 +215,13 @@ export default function RadialWheel({
           fontWeight: 700,
           textTransform: "uppercase",
           letterSpacing: "0.06em",
-          color: isHovered ? "var(--accent-blue)" : "var(--text-tertiary)",
-          marginBottom: "6px",
+          color: isVisible ? "var(--accent-blue)" : "var(--text-tertiary)",
+          marginBottom: isRight ? "0" : "6px",
+          marginRight: isRight ? "8px" : "0",
           transition: "color 0.2s ease",
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+          userSelect: "none",
         }}
       >
         {title}
@@ -161,14 +230,14 @@ export default function RadialWheel({
       <div
         ref={wheelAreaRef}
         style={{
-          width: `${size}px`,
-          height: `${radius}px`,
+          width: isRight ? `${radius}px` : `${size}px`,
+          height: isRight ? `${size}px` : `${radius}px`,
           position: "relative",
           overflow: "hidden",
           userSelect: "none",
           touchAction: "none",
           cursor: "pointer",
-          filter: isHovered
+          filter: isVisible
             ? "drop-shadow(0 12px 24px rgba(0,0,0,0.12))"
             : "drop-shadow(0 4px 12px rgba(0,0,0,0.06))",
           transition: "filter 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
@@ -182,6 +251,8 @@ export default function RadialWheel({
             position: "absolute",
             top: 0,
             left: 0,
+            transform: isRight ? "rotate(-90deg)" : "none",
+            transformOrigin: `${radius}px ${radius}px`,
           }}
         >
           <g
@@ -201,6 +272,8 @@ export default function RadialWheel({
               const textX = radius + labelRadius * Math.cos(rad);
               const textY = radius + labelRadius * Math.sin(rad);
 
+              const textRotation = isRight ? -rotationDeg + 90 : -rotationDeg;
+
               return (
                 <g key={i} onClick={() => handleSectorClick(i)} style={{ cursor: "pointer" }}>
                   <path
@@ -218,7 +291,7 @@ export default function RadialWheel({
                       y={textY - iconSize / 2}
                       width={iconSize}
                       height={iconSize}
-                      transform={`rotate(${-rotationDeg}, ${textX}, ${textY})`}
+                      transform={`rotate(${textRotation}, ${textX}, ${textY})`}
                       style={{ pointerEvents: "none" }}
                     />
                   ) : (
@@ -226,11 +299,11 @@ export default function RadialWheel({
                       x={textX}
                       y={textY}
                       fill={isSelected ? "#ffffff" : "var(--text-secondary)"}
-                      fontSize={isSelected ? "18px" : "14px"}
+                      fontSize={isSelected ? fontSizeSelected : fontSizeUnselected}
                       fontWeight={isSelected ? "700" : "500"}
                       textAnchor="middle"
                       dominantBaseline="central"
-                      transform={`rotate(${-rotationDeg}, ${textX}, ${textY})`}
+                      transform={`rotate(${textRotation}, ${textX}, ${textY})`}
                       style={{ pointerEvents: "none" }}
                     >
                       {opt.label.length > 13 ? `${opt.label.slice(0, 11)}…` : opt.label}
@@ -243,18 +316,21 @@ export default function RadialWheel({
 
           <circle cx={radius} cy={radius} r={innerRadius - 1} fill="var(--card-bg)" />
 
-          <text
-            x={radius}
-            y={radius - innerRadius / 2.3}
-            fill="var(--text-primary)"
-            fontSize="12px"
-            fontWeight="700"
-            textAnchor="middle"
-            dominantBaseline="central"
-            style={{ pointerEvents: "none" }}
-          >
-            {options[selectedIndex]?.label}
-          </text>
+          {showCenterText && (
+            <text
+              x={centerTextX}
+              y={centerTextY}
+              fill="var(--text-primary)"
+              fontSize="12px"
+              fontWeight="700"
+              textAnchor="middle"
+              dominantBaseline="central"
+              transform={isRight ? `rotate(90, ${centerTextX}, ${centerTextY})` : undefined}
+              style={{ pointerEvents: "none" }}
+            >
+              {options[selectedIndex]?.label}
+            </text>
+          )}
         </svg>
       </div>
     </div>

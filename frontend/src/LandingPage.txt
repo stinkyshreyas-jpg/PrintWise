@@ -1,0 +1,264 @@
+import React, { useRef } from "react";
+import { motion, useScroll, type Variants } from "framer-motion";
+import PrinterExperience from "./PrinterExperience";
+
+interface LandingPageProps {
+  onLaunchApp: () => void;
+}
+
+const fadeUp: Variants = {
+  hidden: { opacity: 0, y: 24 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.7, ease: [0.16, 1, 0.3, 1] as const } },
+};
+
+function SectionText({ eyebrow, title, body }: { eyebrow?: string; title: string; body?: string }) {
+  return (
+    <motion.div
+      initial="hidden"
+      whileInView="visible"
+      viewport={{ once: false, amount: 0.5 }}
+      variants={fadeUp}
+      className="max-w-2xl"
+    >
+      {eyebrow && (
+        <span className="text-xs font-bold uppercase tracking-wider text-[var(--accent-blue)] bg-blue-50 px-3.5 py-1.5 rounded-full border border-blue-200 inline-block mb-5">
+          {eyebrow}
+        </span>
+      )}
+      <h2 className="text-3xl md:text-5xl font-extrabold tracking-tight leading-tight text-[var(--text-primary)]">
+        {title}
+      </h2>
+      {body && <p className="text-base md:text-lg text-[var(--text-secondary)] mt-4">{body}</p>}
+    </motion.div>
+  );
+}
+
+function GlassCard({ label, value }: { label: string; value: string }) {
+  return (
+    <motion.div
+      variants={fadeUp}
+      whileHover={{ y: -4 }}
+      transition={{ type: "spring", stiffness: 300, damping: 20 }}
+      className="rounded-2xl px-6 py-5 backdrop-blur-xl bg-white/60 border border-white/80 shadow-[0_20px_40px_rgba(0,0,0,0.06)]"
+    >
+      <div className="text-xs font-bold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">{label}</div>
+      <div className="text-2xl font-extrabold text-[var(--text-primary)]">{value}</div>
+    </motion.div>
+  );
+}
+
+function FeatureRow({ title, body, reverse }: { title: string; body: string; reverse?: boolean }) {
+  return (
+    <motion.div
+      initial="hidden"
+      whileInView="visible"
+      viewport={{ once: false, amount: 0.4 }}
+      variants={fadeUp}
+      whileHover={{ scale: 1.01 }}
+      className={`flex flex-col md:flex-row ${reverse ? "md:flex-row-reverse" : ""} items-center gap-8 py-10 border-b border-gray-200`}
+    >
+      <div className="flex-1">
+        <h3 className="text-2xl font-bold text-[var(--text-primary)] mb-2">{title}</h3>
+        <p className="text-[var(--text-secondary)]">{body}</p>
+      </div>
+      <div className="flex-1 h-40 rounded-2xl bg-gradient-to-br from-blue-50 to-gray-50 border border-gray-200" />
+    </motion.div>
+  );
+}
+
+const FEATURES = [
+  { title: "AI Print Advisor", body: "Personalized settings recommendations based on your model's actual geometry." },
+  { title: "Smart Material Estimation", body: "Weight and cost calculated from real wall, infill, and layer parameters." },
+  { title: "Support Heatmaps", body: "See exactly where overhangs need support before you slice." },
+  { title: "Failure Detection", body: "Catch thin walls, open meshes, and fragile geometry early." },
+  { title: "Strength Analysis", body: "Understand where your print is structurally weakest." },
+  { title: "Print Cost Estimation", body: "Know your material spend before you commit filament." },
+  { title: "Model Validation", body: "Automatic watertightness and manifold checks." },
+  { title: "One-click Presets", body: "Printer-aware defaults tuned per nozzle and material." },
+];
+
+const COMPARISON = [
+  { title: "Traditional Slicers", points: ["Manual trial and error", "No structural insight", "Guesswork on cost/weight"] },
+  { title: "Manual Workflow", points: ["Hours of tuning per model", "Inconsistent results", "No failure prediction"] },
+  { title: "Our Platform", points: ["AI-driven recommendations", "Failure detection built in", "Accurate cost & weight"], highlight: true },
+];
+
+export default function LandingPage({ onLaunchApp }: LandingPageProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const { scrollYProgress } = useScroll({ container: scrollRef });
+
+  return (
+    <div ref={scrollRef} className="h-screen overflow-y-scroll overflow-x-hidden relative">
+      <PrinterExperience progress={scrollYProgress} />
+
+      {/* NAVBAR */}
+      <nav className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-8 py-4 backdrop-blur-md border-b border-gray-200">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-[var(--accent-blue)] flex items-center justify-center text-white font-bold text-sm shadow-md">
+            S
+          </div>
+          <span className="font-bold text-lg tracking-tight">SlicingLab</span>
+        </div>
+        <button
+          onClick={onLaunchApp}
+          className="px-5 py-2 text-sm font-semibold rounded-full bg-[var(--accent-blue)] text-white shadow-lg hover:opacity-90 transition-all hover:scale-105 active:scale-95"
+        >
+          Launch Slicer App →
+        </button>
+      </nav>
+
+      {/* 0: HERO */}
+      <section className="h-screen flex flex-col justify-center items-start px-10 md:px-20 relative">
+        <SectionText
+          eyebrow="Next-Gen Print Optimization"
+          title="The smarter way to prepare every print."
+          body="AI-powered print analysis that understands your model before you ever slice."
+        />
+        <motion.button
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3, duration: 0.6 }}
+          onClick={onLaunchApp}
+          className="mt-8 px-8 py-3.5 text-base font-bold rounded-full bg-[var(--accent-blue)] text-white shadow-xl hover:opacity-90 transition-all hover:scale-105 active:scale-95"
+        >
+          Start Slicing Now
+        </motion.button>
+      </section>
+
+      {/* 1: HOTEND ZOOM */}
+      <section className="h-screen flex flex-col justify-center items-end px-10 md:px-20 text-right">
+        <SectionText eyebrow="Precision Tuning" title="Nozzle-aware settings, dialed in automatically." />
+        <div className="mt-6 flex flex-col gap-2 items-end">
+          {["Automatic print recommendations", "Intelligent quality presets", "Layer height optimization", "Nozzle-aware settings"].map((t) => (
+            <motion.div
+              key={t}
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: false, amount: 0.6 }}
+              variants={fadeUp}
+              className="text-[var(--text-secondary)] text-sm font-medium"
+            >
+              {t}
+            </motion.div>
+          ))}
+        </div>
+      </section>
+
+      {/* 2: UNDERNEATH BED / ANALYSIS */}
+      <section className="h-screen flex flex-col justify-center items-start px-10 md:px-20">
+        <SectionText
+          eyebrow="Structural Insight"
+          title="See problems before they happen."
+          body="Support prediction, overhang analysis, thin wall detection, and structural inspection -- visualized directly on your model."
+        />
+      </section>
+
+      {/* 3: STAT CARDS */}
+      <section className="h-screen flex flex-col justify-center items-center px-10 md:px-20">
+        <SectionText title="Every print, fully quantified." />
+        <motion.div
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: false, amount: 0.3 }}
+          transition={{ staggerChildren: 0.08 }}
+          className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-10 max-w-3xl"
+        >
+          <GlassCard label="Weight" value="184.2 g" />
+          <GlassCard label="Material Cost" value="$4.61" />
+          <GlassCard label="Print Time" value="6h 24m" />
+          <GlassCard label="Filament Usage" value="61.2 m" />
+          <GlassCard label="Estimated Strength" value="High" />
+          <GlassCard label="Printability Score" value="94 / 100" />
+        </motion.div>
+      </section>
+
+      {/* 4: MESH VIEWER TRANSITION */}
+      <section className="h-screen flex flex-col justify-center items-start px-10 md:px-20">
+        <SectionText
+          eyebrow="Under The Hood"
+          title="Real mesh analysis, not guesswork."
+          body="Triangles, mesh cleanup, volume calculation, surface area, and automatic model repair."
+        />
+      </section>
+
+      {/* 5: LAYER BUILD */}
+      <section className="h-screen flex flex-col justify-center items-end px-10 md:px-20 text-right">
+        <SectionText
+          eyebrow="Real Slicing Engine"
+          title="Watch your print come together, layer by layer."
+          body="Layer simulation, wall generation, adaptive recommendations, and AI optimization -- all before you commit filament."
+        />
+      </section>
+
+      {/* 6: FEATURES */}
+      <section className="min-h-screen py-24 px-10 md:px-20 bg-white/70 backdrop-blur-sm">
+        <SectionText title="Everything your slicer should have done from the start." />
+        <div className="mt-10 max-w-4xl mx-auto">
+          {FEATURES.map((f, i) => (
+            <FeatureRow key={f.title} title={f.title} body={f.body} reverse={i % 2 === 1} />
+          ))}
+        </div>
+      </section>
+
+      {/* 7: COMPARISON */}
+      <section className="h-screen flex flex-col justify-center items-center px-10 md:px-20">
+        <SectionText title="Why switch?" />
+        <motion.div
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: false, amount: 0.3 }}
+          transition={{ staggerChildren: 0.1 }}
+          className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-10 max-w-4xl w-full"
+        >
+          {COMPARISON.map((c) => (
+            <motion.div
+              key={c.title}
+              variants={fadeUp}
+              className={`rounded-2xl p-6 border ${
+                c.highlight ? "bg-[var(--accent-blue)] text-white border-transparent shadow-xl" : "bg-white border-gray-200"
+              }`}
+            >
+              <h3 className="text-lg font-bold mb-4">{c.title}</h3>
+              <ul className="space-y-2 text-sm">
+                {c.points.map((p) => (
+                  <li key={p} className={c.highlight ? "text-white/90" : "text-[var(--text-secondary)]"}>
+                    • {p}
+                  </li>
+                ))}
+              </ul>
+            </motion.div>
+          ))}
+        </motion.div>
+      </section>
+
+      {/* 8: FINAL CTA */}
+      <section className="h-screen flex flex-col justify-center items-center px-10 text-center relative">
+        <motion.h2
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: false, amount: 0.6 }}
+          variants={fadeUp}
+          className="text-4xl md:text-6xl font-extrabold tracking-tight text-[var(--text-primary)]"
+        >
+          Print smarter.
+          <br />
+          Not harder.
+        </motion.h2>
+        <motion.button
+          initial={{ opacity: 0, y: 16 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: false, amount: 0.6 }}
+          transition={{ delay: 0.2, duration: 0.6 }}
+          onClick={onLaunchApp}
+          className="mt-8 px-10 py-4 text-lg font-bold rounded-full bg-[var(--accent-blue)] text-white shadow-xl hover:opacity-90 transition-all hover:scale-105 active:scale-95"
+        >
+          Start Printing
+        </motion.button>
+
+        <footer className="absolute bottom-6 text-xs text-[var(--text-tertiary)]">
+          © {new Date().getFullYear()} SlicingLab
+        </footer>
+      </section>
+    </div>
+  );
+}
