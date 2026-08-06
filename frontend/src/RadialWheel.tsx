@@ -15,7 +15,7 @@ interface RadialWheelProps {
   offsetX?: number;
   offsetY?: number;
   iconSize?: number;
-  orientation?: "bottom" | "right";
+  orientation?: "bottom" | "right" | "left";
   showCenterText?: boolean;
   fontSizeSelected?: string;
   fontSizeUnselected?: string;
@@ -40,6 +40,8 @@ export default function RadialWheel({
   popDuration = 750,
 }: RadialWheelProps) {
   const isRight = orientation === "right";
+  const isLeft = orientation === "left";
+  const isHorizontal = isRight || isLeft;
 
   const wheelAreaRef = useRef<HTMLDivElement>(null);
   const isCooldown = useRef(false);
@@ -57,37 +59,29 @@ export default function RadialWheel({
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
-  
- 
-
   const radius = size / 2;
   const innerRadius = radius * 0.3;
   const labelRadius = (radius + innerRadius) / 2;
   const totalOptions = options.length;
   const sliceAngle = 360 / totalOptions;
 
-   
-const isFirstRender = useRef(true);
+  const isFirstRender = useRef(true);
+  const currentSelectedValue = options[selectedIndex]?.value ?? options[selectedIndex]?.label;
 
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
 
-const currentSelectedValue = options[selectedIndex]?.value ?? options[selectedIndex]?.label;
+    setIsAutoPopped(true);
 
-useEffect(() => {
-  
-  if (isFirstRender.current) {
-    isFirstRender.current = false;
-    return;
-  }
+    const timer = setTimeout(() => {
+      setIsAutoPopped(false);
+    }, popDuration);
 
-  
-  setIsAutoPopped(true);
-
-  const timer = setTimeout(() => {
-    setIsAutoPopped(false);
-  }, popDuration);
-
-  return () => clearTimeout(timer);
-}, [selectedIndex, currentSelectedValue, options, popDuration]);
+    return () => clearTimeout(timer);
+  }, [selectedIndex, currentSelectedValue, options, popDuration]);
 
   useEffect(() => {
     setRotationDeg((prevRot) => {
@@ -169,10 +163,17 @@ useEffect(() => {
     onChange(i);
   };
 
-  const centerTextY = isRight ? radius : radius - innerRadius / 2.3;
-  const centerTextX = isRight ? radius + innerRadius / 2.3 : radius;
+  // Center text coordinates depending on orientation
+  let centerTextY = radius;
+  let centerTextX = radius;
+  if (isRight) {
+    centerTextX = radius + innerRadius / 2.3;
+  } else if (isLeft) {
+    centerTextX = radius - innerRadius / 2.3;
+  } else {
+    centerTextY = radius - innerRadius / 2.3;
+  }
 
-  
   const isVisible = isHovered || isAutoPopped;
 
   const getTransform = () => {
@@ -184,12 +185,22 @@ useEffect(() => {
     }
 
     if (isRight) {
-      const slideX = isVisible ? "10px" : `${radius+10}px`;
+      const slideX = isVisible ? "10px" : `${radius + 10}px`;
+      return `${baseTranslate} translateX(${slideX}) ${scale}`;
+    } else if (isLeft) {
+      const slideX = isVisible ? "-10px" : `-${radius + 10}px`;
       return `${baseTranslate} translateX(${slideX}) ${scale}`;
     } else {
-      const slideY = isVisible ? "10px" : `${radius+10}px`;
+      const slideY = isVisible ? "10px" : `${radius + 10}px`;
       return `${baseTranslate} translateY(${slideY}) ${scale}`;
     }
+  };
+
+  // Determine flex direction and order for left vs right
+  const getFlexDirection = () => {
+    if (isRight) return "row";
+    if (isLeft) return "row-reverse";
+    return "column";
   };
 
   return (
@@ -198,12 +209,12 @@ useEffect(() => {
       onMouseLeave={() => setIsHovered(false)}
       style={{
         display: "flex",
-        flexDirection: isRight ? "row" : "column",
+        flexDirection: getFlexDirection(),
         alignItems: "center",
         justifyContent: "flex-end",
         position: "relative",
         transform: getTransform(),
-        transformOrigin: isRight ? "right center" : "bottom center",
+        transformOrigin: isRight ? "right center" : isLeft ? "left center" : "bottom center",
         transition: "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1)",
         zIndex: isVisible ? 20 : 1,
         padding: "8px",
@@ -216,8 +227,9 @@ useEffect(() => {
           textTransform: "uppercase",
           letterSpacing: "0.06em",
           color: isVisible ? "var(--accent-blue)" : "var(--text-tertiary)",
-          marginBottom: isRight ? "0" : "6px",
+          marginBottom: isHorizontal ? "0" : "6px",
           marginRight: isRight ? "8px" : "0",
+          marginLeft: isLeft ? "8px" : "0",
           transition: "color 0.2s ease",
           cursor: "pointer",
           whiteSpace: "nowrap",
@@ -230,8 +242,8 @@ useEffect(() => {
       <div
         ref={wheelAreaRef}
         style={{
-          width: isRight ? `${radius}px` : `${size}px`,
-          height: isRight ? `${size}px` : `${radius}px`,
+          width: isHorizontal ? `${radius}px` : `${size}px`,
+          height: isHorizontal ? `${size}px` : `${radius}px`,
           position: "relative",
           overflow: "hidden",
           userSelect: "none",
@@ -250,8 +262,8 @@ useEffect(() => {
           style={{
             position: "absolute",
             top: 0,
-            left: 0,
-            transform: isRight ? "rotate(-90deg)" : "none",
+            left: isLeft ? `-${radius}px` : 0,
+            transform: isRight ? "rotate(-90deg)" : isLeft ? "rotate(90deg)" : "none",
             transformOrigin: `${radius}px ${radius}px`,
           }}
         >
@@ -272,7 +284,9 @@ useEffect(() => {
               const textX = radius + labelRadius * Math.cos(rad);
               const textY = radius + labelRadius * Math.sin(rad);
 
-              const textRotation = isRight ? -rotationDeg + 90 : -rotationDeg;
+              let textRotation = -rotationDeg;
+              if (isRight) textRotation = -rotationDeg + 90;
+              if (isLeft) textRotation = -rotationDeg - 90;
 
               return (
                 <g key={i} onClick={() => handleSectorClick(i)} style={{ cursor: "pointer" }}>
@@ -325,7 +339,13 @@ useEffect(() => {
               fontWeight="700"
               textAnchor="middle"
               dominantBaseline="central"
-              transform={isRight ? `rotate(90, ${centerTextX}, ${centerTextY})` : undefined}
+              transform={
+                isRight
+                  ? `rotate(90, ${centerTextX}, ${centerTextY})`
+                  : isLeft
+                  ? `rotate(-90, ${centerTextX}, ${centerTextY})`
+                  : undefined
+              }
               style={{ pointerEvents: "none" }}
             >
               {options[selectedIndex]?.label}

@@ -48,6 +48,156 @@ function deriveAverageThicknessMm(
   return (sideThicknessMm + topThicknessMm + bottomThicknessMm) / 3;
 }
 
+const OVERHANG_SUPPORT_THRESHOLD_DEG = 45;
+const CRITICAL_OVERHANG_THRESHOLD_DEG = 60;
+
+interface OverhangAnalysisResult {
+  unsupportedOverhangAreaMm2: number;
+  criticalOverhangAreaMm2: number;
+  maxOverhangAngle: number;
+  unsupportedOverhangRatio: number;
+  criticalOverhangRatio: number;
+  overhangRatio: number;
+  overhangSeverityAttribute: THREE.BufferAttribute;
+}
+
+function computeOverhangAnalysis(
+  geometry: THREE.BufferGeometry,
+  layerHeightMm: number
+): OverhangAnalysisResult {
+  const pos = geometry.attributes.position;
+  const vertexCount = pos?.count ?? 0;
+  const severity = new Float32Array(vertexCount);
+
+  const emptyResult: OverhangAnalysisResult = {
+    unsupportedOverhangAreaMm2: 0,
+    criticalOverhangAreaMm2: 0,
+    maxOverhangAngle: 0,
+    unsupportedOverhangRatio: 0,
+    criticalOverhangRatio: 0,
+    overhangRatio: 0,
+    overhangSeverityAttribute: new THREE.BufferAttribute(severity, 1),
+  };
+
+  if (!geometry.boundsTree || vertexCount === 0) return emptyResult;
+
+  geometry.computeBoundingBox();
+  const bbox = geometry.boundingBox!;
+  const minZ = bbox.min.z;
+  const heightRange = Math.max(bbox.max.z - minZ, 0.001);
+  const plateTolerance = Math.max(layerHeightMm * 2, heightRange * 0.02, 0.2);
+  const supportThresholdSin = Math.sin((OVERHANG_SUPPORT_THRESHOLD_DEG * Math.PI) / 180);
+
+  const raycaster = new THREE.Raycaster();
+  raycaster.firstHitOnly = false;
+
+  const rayMesh = new THREE.Mesh(
+    geometry,
+    new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })
+  );
+  rayMesh.updateMatrixWorld(true);
+
+  const p1 = new THREE.Vector3();
+  const p2 = new THREE.Vector3();
+  const p3 = new THREE.Vector3();
+  const ab = new THREE.Vector3();
+  const ac = new THREE.Vector3();
+  const cross = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  const centroid = new THREE.Vector3();
+  const rayOrigin = new THREE.Vector3();
+  const down = new THREE.Vector3(0, 0, -1);
+
+  let surfaceAreaMm2 = 0;
+  let unsupportedOverhangAreaMm2 = 0;
+  let criticalOverhangAreaMm2 = 0;
+  let maxOverhangAngle = 0;
+
+  const upwardBias = Math.max(layerHeightMm * 0.5, 0.05);
+
+  for (let i = 0; i < vertexCount; i += 3) {
+    p1.fromBufferAttribute(pos, i);
+    p2.fromBufferAttribute(pos, i + 1);
+    p3.fromBufferAttribute(pos, i + 2);
+
+    ab.subVectors(p2, p1);
+    ac.subVectors(p3, p1);
+    cross.crossVectors(ab, ac);
+    const triArea = cross.length() * 0.5;
+    if (triArea < 1e-9) continue;
+
+    surfaceAreaMm2 += triArea;
+    normal.copy(cross).normalize();
+
+    // Upward-facing and shallow downward slopes are self-supporting.
+    if (normal.z >= -supportThresholdSin) continue;
+
+    const overhangAngle =
+      Math.asin(Math.min(Math.max(-normal.z, 0), 1)) * (180 / Math.PI);
+    if (overhangAngle <= OVERHANG_SUPPORT_THRESHOLD_DEG) continue;
+
+    centroid.set(
+      (p1.x + p2.x + p3.x) / 3,
+      (p1.y + p2.y + p3.y) / 3,
+      (p1.z + p2.z + p3.z) / 3
+    );
+
+    // Faces on the build plate are supported by the bed.
+    if (centroid.z <= minZ + plateTolerance) continue;
+
+    rayOrigin.set(centroid.x, centroid.y, centroid.z + upwardBias);
+    raycaster.set(rayOrigin, down);
+    raycaster.near = 0.01;
+    raycaster.far = rayOrigin.z - minZ;
+
+    const hits = raycaster.intersectObject(rayMesh, false);
+    
+    // Check if there is a valid supporting solid floor beneath this point
+    let isSupported = false;
+    for (const hit of hits) {
+      if (hit.distance > upwardBias) {
+        isSupported = true;
+        break;
+      }
+    }
+    
+    if (isSupported) continue;
+
+    unsupportedOverhangAreaMm2 += triArea;
+    maxOverhangAngle = Math.max(maxOverhangAngle, overhangAngle);
+
+    let severityValue: number;
+    if (overhangAngle >= CRITICAL_OVERHANG_THRESHOLD_DEG) {
+      criticalOverhangAreaMm2 += triArea;
+      severityValue = 1.0;
+    } else {
+      const span = CRITICAL_OVERHANG_THRESHOLD_DEG - OVERHANG_SUPPORT_THRESHOLD_DEG;
+      severityValue =
+        0.5 +
+        0.5 * ((overhangAngle - OVERHANG_SUPPORT_THRESHOLD_DEG) / span);
+    }
+
+    severity[i] = Math.max(severity[i], severityValue);
+    severity[i + 1] = Math.max(severity[i + 1], severityValue);
+    severity[i + 2] = Math.max(severity[i + 2], severityValue);
+  }
+
+  const unsupportedOverhangRatio =
+    surfaceAreaMm2 > 0 ? unsupportedOverhangAreaMm2 / surfaceAreaMm2 : 0;
+  const criticalOverhangRatio =
+    surfaceAreaMm2 > 0 ? criticalOverhangAreaMm2 / surfaceAreaMm2 : 0;
+
+  return {
+    unsupportedOverhangAreaMm2,
+    criticalOverhangAreaMm2,
+    maxOverhangAngle,
+    unsupportedOverhangRatio,
+    criticalOverhangRatio,
+    overhangRatio: unsupportedOverhangRatio,
+    overhangSeverityAttribute: new THREE.BufferAttribute(severity, 1),
+  };
+}
+
 const computeZStressTexture = (geometry: THREE.BufferGeometry, slices = 64) => {
   geometry.computeBoundingBox();
   const bbox = geometry.boundingBox;
@@ -200,6 +350,11 @@ export default function Model({
     [geometry]
   );
 
+  const overhangAnalysis = useMemo(
+    () => computeOverhangAnalysis(geometry, layerHeightMm),
+    [geometry, layerHeightMm]
+  );
+
   const { thinWallAttribute, thinWallCount } = useMemo(() => {
     if (!geometry.boundsTree) return { thinWallAttribute: null, thinWallCount: 0 };
 
@@ -271,6 +426,15 @@ export default function Model({
   }, [geometry, nozzleDiameterMm]);
 
   useEffect(() => {
+    if (activeHeatmap === "overhang") {
+      geometry.setAttribute("aOverhangSeverity", overhangAnalysis.overhangSeverityAttribute);
+      geometry.attributes.aOverhangSeverity.needsUpdate = true;
+    } else if (geometry.hasAttribute("aOverhangSeverity")) {
+      geometry.deleteAttribute("aOverhangSeverity");
+    }
+  }, [activeHeatmap, overhangAnalysis.overhangSeverityAttribute, geometry]);
+
+  useEffect(() => {
     if (activeHeatmap === "thinWall" && thinWallAttribute) {
       geometry.setAttribute("aIsThin", thinWallAttribute);
       geometry.attributes.aIsThin.needsUpdate = true;
@@ -284,9 +448,7 @@ export default function Model({
 
     let volumeMm3 = 0;
     let surfaceAreaMm2 = 0;
-    let overhangAreaMm2 = 0;
     const positions = geometry.attributes.position.array;
-    const normals = geometry.attributes.normal?.array;
 
     const p1 = new THREE.Vector3();
     const p2 = new THREE.Vector3();
@@ -294,7 +456,6 @@ export default function Model({
     const ab = new THREE.Vector3();
     const ac = new THREE.Vector3();
     const cross = new THREE.Vector3();
-    const gravity = new THREE.Vector3(0, 0, -1);
 
     for (let i = 0; i < positions.length; i += 9) {
       p1.fromArray(positions, i);
@@ -305,21 +466,7 @@ export default function Model({
 
       ab.subVectors(p2, p1);
       ac.subVectors(p3, p1);
-      const triArea = cross.crossVectors(ab, ac).length() / 2.0;
-      surfaceAreaMm2 += triArea;
-
-      if (normals) {
-        const nX = (normals[i] + normals[i + 3] + normals[i + 6]) / 3;
-        const nY = (normals[i + 1] + normals[i + 4] + normals[i + 7]) / 3;
-        const nZ = (normals[i + 2] + normals[i + 5] + normals[i + 8]) / 3;
-        const normVec = new THREE.Vector3(nX, nY, nZ).normalize();
-
-        const dotDown = normVec.dot(gravity);
-        const overhangAngle = Math.asin(Math.min(Math.max(-dotDown, -1.0), 1.0)) * (180 / Math.PI);
-        if (overhangAngle > 45) {
-          overhangAreaMm2 += triArea;
-        }
-      }
+      surfaceAreaMm2 += cross.crossVectors(ab, ac).length() / 2.0;
     }
     volumeMm3 = Math.abs(volumeMm3);
 
@@ -350,7 +497,7 @@ export default function Model({
     const weightGrams = shellWeightGrams + infillWeightGrams;
     const cost = (weightGrams / spoolWeightGrams) * spoolPrice;
 
-    const needsSupports = overhangAreaMm2 > surfaceAreaMm2 * 0.05;
+    const needsSupports = overhangAnalysis.unsupportedOverhangRatio > 0.03;
 
     let layerMultiplier = 0.5;
     if (nozzleDiameterMm <= 0.25) layerMultiplier = 0.35;
@@ -384,7 +531,9 @@ export default function Model({
       shellThicknessMm: avgShellThicknessMm,
       materialEstimate: { weightGrams, cost, shellWeightGrams, infillWeightGrams },
       heatmapMetrics: {
-        overhangRatio: surfaceAreaMm2 > 0 ? overhangAreaMm2 / surfaceAreaMm2 : 0,
+        overhangRatio: overhangAnalysis.unsupportedOverhangRatio,
+        criticalOverhangRatio: overhangAnalysis.criticalOverhangRatio,
+        maxOverhangAngle: overhangAnalysis.maxOverhangAngle,
         stressScore: maxStressRatio,
         thinWallRatio: totalVertices > 0 ? thinWallCount / totalVertices : 0,
         complexityRatio,
@@ -396,7 +545,9 @@ export default function Model({
         layerHeightMm: recLayerHeightMm,
         nozzleDiameterMm: nozzleDiameterMm,
         reasoning: {
-          overhangRatio: surfaceAreaMm2 > 0 ? (overhangAreaMm2 / surfaceAreaMm2).toFixed(3) : 0,
+          overhangRatio: overhangAnalysis.unsupportedOverhangRatio.toFixed(3),
+          criticalOverhangRatio: overhangAnalysis.criticalOverhangRatio.toFixed(3),
+          maxOverhangAngle: overhangAnalysis.maxOverhangAngle.toFixed(1),
           complexityRatio: complexityRatio.toFixed(3),
           structuralStressScore: maxStressRatio.toFixed(2),
         },
@@ -417,6 +568,7 @@ export default function Model({
     bottomLayerCount,
     maxStressRatio,
     thinWallCount,
+    overhangAnalysis,
   ]);
 
   useEffect(() => {

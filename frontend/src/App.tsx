@@ -4,11 +4,6 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import Model from "./Model";
 import RadialWheel from "./RadialWheel";
-
-
-
-
-
 export const PRESETS = [
   { value: "balanced", label: "Balanced", targetRatio: 0.50, walls: 3, infill: 15 },
   { value: "appearance", label: "Best Appearance", targetRatio: 0.30, walls: 2, infill: 10 },
@@ -17,13 +12,11 @@ export const PRESETS = [
   { value: "lowest_cost", label: "Lowest Cost", targetRatio: 0.65, walls: 2, infill: 5 },
   { value: "lightest", label: "Lightest Part", targetRatio: 0.50, walls: 2, infill: 5 },
 ];
-
 function getClosestIndex(arr: number[], target: number): number {
   return arr.reduce((bestIdx, curr, idx) =>
     Math.abs(curr - target) < Math.abs(arr[bestIdx] - target) ? idx : bestIdx
   , 0);
 }
-
 export const PRINTER_OPTIONS = [
   { label: "Bambu X1-Carbon", value: "x1c", iconUrl: "/printers/x1c.png", bedSize: { x: 256, y: 256, z: 256 }, defaults: { nozzle: 1, layerHeight: 3, wallLoops: 1, infill: 2 } },
   { label: "Bambu P1S", value: "p1s", iconUrl: "/printers/p1s.png", bedSize: { x: 256, y: 256, z: 256 }, defaults: { nozzle: 1, layerHeight: 3, wallLoops: 1, infill: 2 } },
@@ -33,21 +26,18 @@ export const PRINTER_OPTIONS = [
   { label: "Bambu H2C", value: "h2c", iconUrl: "/printers/h2c.png", bedSize: { x: 330, y: 320, z: 325 }, defaults: { nozzle: 1, layerHeight: 2, wallLoops: 1, infill: 2 } },
   { label: "Bambu H2D", value: "h2d", iconUrl: "/printers/h2d.png", bedSize: { x: 350, y: 320, z: 325 }, defaults: { nozzle: 1, layerHeight: 2, wallLoops: 1, infill: 2 } },
 ];
-
 export const MATERIAL_OPTIONS = [
   { label: "PLA", value: "PLA", iconUrl: "/materials/pla.png" },
   { label: "PETG", value: "PETG", iconUrl: "/materials/petg.png" },
   { label: "ABS", value: "ABS", iconUrl: "/materials/abs.png" },
   { label: "TPU", value: "TPU", iconUrl: "/materials/tpu.png" },
 ];
-
 const NOZZLE_OPTIONS = [
   { label: "0.2 mm", value: 0.2 },
   { label: "0.4 mm", value: 0.4 },
   { label: "0.6 mm", value: 0.6 },
   { label: "0.8 mm", value: 0.8 },
 ];
-
 const LAYER_OPTIONS_BY_NOZZLE: Record<number, { label: string; value: number }[]> = {
   0.2: [
     { label: "0.08 mm", value: 0.08 },
@@ -72,7 +62,6 @@ const LAYER_OPTIONS_BY_NOZZLE: Record<number, { label: string; value: number }[]
     { label: "0.40 mm", value: 0.40 },
   ],
 };
-
 const WALL_OPTIONS = [
   { label: "1 Loop", value: 1 },
   { label: "2 Loops", value: 2 },
@@ -80,7 +69,6 @@ const WALL_OPTIONS = [
   { label: "4 Loops", value: 4 },
   { label: "6 Loops", value: 6 },
 ];
-
 const INFILL_OPTIONS = [
   { label: "5%", value: 5 },
   { label: "10%", value: 10 },
@@ -89,118 +77,109 @@ const INFILL_OPTIONS = [
   { label: "50%", value: 50 },
   { label: "100%", value: 100 },
 ];
-
 const HEATMAP_MODES = [
   { key: "none", label: "None" },
   { key: "overhang", label: "Overhang" },
   { key: "stress", label: "Stress" },
   { key: "thinWall", label: "Thin Walls" },
 ] as const;
-
-
-
-
-
+interface HeatmapMetrics {
+  overhangRatio?: number;   
+  stressScore?: number;     
+  thinWallRatio?: number;   
+}
+interface PrinterBed {
+  x: number;
+  y: number;
+  z: number;
+}
+function scoreFromRatio(ratio: number, toleranceRatio: number, penaltyMultiplier: number = 2.0): number {
+  const clamped = Math.max(0, Math.min(1, ratio));
+  if (clamped <= toleranceRatio) return 100;
+  const excess = clamped - toleranceRatio;
+  const penalty = Math.min(100, excess * 100 * penaltyMultiplier);
+  return Math.max(0, Math.round(100 - penalty));
+}
 function calculatePrintabilityScore(
   analysis: any,
   holeAnalysis: { hasHoles: boolean; openEdgeCount: number } | null,
-  printerBed: { x: number; y: number; z: number },
-  nozzleDiameterMm: number
+  printerBed: PrinterBed
 ) {
   if (!analysis) return null;
-
   const {
     overhangRatio = 0,
-    stressScore = 0,
+    stressScore: rawStressMetric = 0,
     thinWallRatio = 0,
-  } = analysis.heatmapMetrics || {};
-
-  
-  let meshScore = 100;
-  if (holeAnalysis?.hasHoles) {
-    meshScore = Math.max(0, 100 - (holeAnalysis.openEdgeCount || 0) * 12);
-  }
-
-  
-  
-  
-  let overhangScore = 100;
-  if (overhangRatio > 0.03) {
-    const excessRatio = overhangRatio - 0.03;
-    const penalty = Math.min(100, Math.pow(excessRatio * 8.0, 1.8) * 100);
-    overhangScore = Math.max(0, Math.round(100 - penalty));
-  }
-
-  
-  
-  const effectiveWallRatio = Math.max(0, thinWallRatio - 0.02);
-  const wallScore = Math.max(0, Math.round(100 - effectiveWallRatio * 150));
-
-  
+  }: HeatmapMetrics = analysis.heatmapMetrics || {};
+  const normalizedStress = rawStressMetric / 100;
+  const overhangScore = scoreFromRatio(overhangRatio, 0.01, 3.0);
+  const wallScore = scoreFromRatio(thinWallRatio, 0.02, 0.6);
+  const stressScore = scoreFromRatio(Math.max(0, Math.min(1, normalizedStress)), 0.25, 1.2);
+  let score = Math.round(
+    overhangScore * 0.45 +
+    wallScore * 0.40 +
+    stressScore * 0.15
+  );
   const fitsX = analysis.x <= printerBed.x;
   const fitsY = analysis.y <= printerBed.y;
   const fitsZ = analysis.z <= printerBed.z;
-
-  let fitAndStressScore = 100;
-  if (!fitsX || !fitsY || !fitsZ) {
-    fitAndStressScore = 0;
-  } else {
-    const stressPenalty = Math.min(20, stressScore * 4); 
-    fitAndStressScore = Math.max(20, Math.round(100 - stressPenalty));
-
-    
-    if (analysis.x > printerBed.x - 5 || analysis.y > printerBed.y - 5) {
-      fitAndStressScore -= 5;
-    }
+  const fitsAll = fitsX && fitsY && fitsZ;
+  const hasOpenHoles = holeAnalysis?.hasHoles && holeAnalysis.openEdgeCount > 0;
+  if (!fitsAll || hasOpenHoles) {
+    score = 0; 
   }
-
-  
-  let rawScore = Math.round(
-    overhangScore * 0.40 +
-    wallScore * 0.30 +
-    meshScore * 0.15 +
-    fitAndStressScore * 0.15
-  );
-
-  
-  if (overhangScore < 40) {
-    rawScore = Math.min(rawScore, 55); 
-  } else if (overhangScore < 70) {
-    rawScore = Math.min(rawScore, 72); 
-  }
-
-  const score = rawScore;
-
-  
   let color = "#10b981"; 
   let statusText = "Ready to Print";
-
-  if (!fitsX || !fitsY || !fitsZ) {
+  if (!fitsAll) {
     color = "#f43f5e"; 
     statusText = "Exceeds Build Volume";
-  } else if (meshScore < 50) {
+  } else if (hasOpenHoles) {
     color = "#f43f5e"; 
-    statusText = "Needs Repair";
-  } else if (overhangScore < 75 || score < 85) {
+    statusText = "Needs Repair (Open Holes)";
+  } else if (score < 60) {
+    color = "#f43f5e";
+    statusText = "High Risk of Failure";
+  } else if (overhangScore < 70 || wallScore < 70) {
     color = "#f59e0b"; 
     statusText = "Supports / Tweaks Needed";
+  } else if (score < 85) {
+    color = "#f59e0b";
+    statusText = "Minor Tweaks Recommended";
   }
-
   return {
     score,
     color,
     statusText,
-    details: {
-      overhangScore,
-      wallScore,
-      meshScore,
-      fitAndStressScore,
+    details: { 
+      meshScore: hasOpenHoles ? 0 : 100, 
+      overhangScore, 
+      wallScore, 
+      stressScore, 
+      fitScore: fitsAll ? 100 : 0 
     },
   };
 }
 export function ScorePill({ printability }: { printability: ReturnType<typeof calculatePrintabilityScore> }) {
+  const [isHovered, setIsHovered] = useState(false);
   if (!printability) return null;
-
+  const { score, color, statusText, details } = printability;
+  const getIssues = () => {
+    const issues = [];
+    if (details.meshScore < 100) {
+      issues.push({ label: 'Mesh Integrity', text: 'Open edges or non-manifold geometry detected.', color: '#ef4444' });
+    }
+    if (details.overhangScore < 85) {
+      issues.push({ label: 'Overhangs', text: 'Steep unsupported angles detected. Supports recommended.', color: '#f59e0b' });
+    }
+    if (details.wallScore < 90) {
+      issues.push({ label: 'Thin Walls', text: 'Fragile areas detected. Model features may be thinner than the nozzle.', color: '#f59e0b' });
+    }
+    if (details.fitScore < 100) {
+      issues.push({ label: 'Fit & Stress', text: 'Model bounds approach bed limits or contain high-stress corners.', color: '#ca8a04' });
+    }
+    return issues;
+  };
+  const issues = getIssues();
   return (
     <div
       style={{
@@ -208,76 +187,138 @@ export function ScorePill({ printability }: { printability: ReturnType<typeof ca
         top: 20,
         left: "50%",
         transform: "translateX(-50%)",
-        zIndex: 20,
+        zIndex: 50,
         display: "flex",
+        flexDirection: "column",
         alignItems: "center",
-        gap: "10px",
-        padding: "8px 16px",
-        borderRadius: "980px",
-        background: "rgba(255, 255, 255, 0.92)",
-        backdropFilter: "blur(16px)",
-        boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05)",
-        border: "1px solid var(--card-border)",
-        cursor: "pointer",
-        transition: "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease",
+        fontFamily: "sans-serif",
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.transform = "translateX(-50%) scale(1.03)")}
-      onMouseLeave={(e) => (e.currentTarget.style.transform = "translateX(-50%) scale(1)")}
-      title={`Mesh Integrity: ${printability.details.meshScore}%\nOverhangs: ${printability.details.overhangScore}%\nWall Safety: ${printability.details.wallScore}%\nBed/Stress: ${printability.details.fitAndStressScore}%`}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
     >
       <div
         style={{
-          width: 32,
-          height: 32,
-          borderRadius: "50%",
-          background: printability.color,
-          color: "#fff",
           display: "flex",
           alignItems: "center",
-          justifyContent: "center",
-          fontWeight: 700,
-          fontSize: "13px",
-          boxShadow: `0 0 12px ${printability.color}66`,
+          gap: "10px",
+          padding: "8px 16px",
+          borderRadius: "980px",
+          background: "rgba(255, 255, 255, 0.95)",
+          backdropFilter: "blur(16px)",
+          boxShadow: isHovered
+            ? "0 15px 30px -5px rgba(0, 0, 0, 0.15), 0 10px 15px -6px rgba(0, 0, 0, 0.1)"
+            : "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05)",
+          border: "1px solid var(--card-border, #e2e8f0)",
+          cursor: "help",
+          transition: "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease",
+          transform: isHovered ? "scale(1.03)" : "scale(1)",
+          zIndex: 20,
+          position: "relative",
         }}
       >
-        {printability.score}
+        <div
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            background: color,
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontWeight: 700,
+            fontSize: "13px",
+            boxShadow: `0 0 12px ${color}66`,
+          }}
+        >
+          {score}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", textAlign: "left", paddingRight: "8px" }}>
+          <span style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-tertiary, #94a3b8)", textTransform: "uppercase", letterSpacing: "0.05em", lineHeight: 1.2 }}>
+            Print Score
+          </span>
+          <span style={{ fontSize: "13px", fontWeight: 700, color: color, lineHeight: 1.2 }}>
+            {statusText}
+          </span>
+        </div>
       </div>
-
-      <div style={{ display: "flex", flexDirection: "column", textAlign: "left" }}>
-        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.2 }}>
-          Print Score
-        </span>
-        <span style={{ fontSize: "10px", fontWeight: 600, color: printability.color, lineHeight: 1.2 }}>
-          {printability.statusText}
-        </span>
+      <div
+        style={{
+          position: "absolute",
+          top: "100%",
+          marginTop: "12px",
+          width: "280px",
+          background: "#fff",
+          borderRadius: "16px",
+          boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+          border: "1px solid var(--card-border, #e2e8f0)",
+          opacity: isHovered ? 1 : 0,
+          visibility: isHovered ? "visible" : "hidden",
+          transform: isHovered ? "translateY(0)" : "translateY(-10px)",
+          transition: "all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
+          zIndex: 10,
+          padding: "20px",
+          pointerEvents: "none",
+        }}
+      >
+        <h4 style={{ fontSize: "11px", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "16px", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px", margin: "0 0 16px 0" }}>
+          Heatmap Breakdown
+        </h4>
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "20px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px" }}>
+            <span style={{ fontWeight: 600, color: "#475569" }}>Overhang Analysis</span>
+            <span style={{ fontWeight: 700, color: details.overhangScore < 85 ? '#f59e0b' : '#10b981' }}>{details.overhangScore} / 100</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px" }}>
+            <span style={{ fontWeight: 600, color: "#475569" }}>Wall Thickness</span>
+            <span style={{ fontWeight: 700, color: details.wallScore < 85 ? '#f59e0b' : '#10b981' }}>{details.wallScore} / 100</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px" }}>
+            <span style={{ fontWeight: 600, color: "#475569" }}>Fit & Stress</span>
+            <span style={{ fontWeight: 700, color: details.fitScore < 100 ? '#ca8a04' : '#10b981' }}>{details.fitScore} / 100</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px" }}>
+            <span style={{ fontWeight: 600, color: "#475569" }}>Mesh Integrity</span>
+            <span style={{ fontWeight: 700, color: details.meshScore < 100 ? '#ef4444' : '#10b981' }}>{details.meshScore} / 100</span>
+          </div>
+        </div>
+        <div style={{ borderTop: "1px solid #f1f5f9", background: "#f8fafc", margin: "0 -20px -20px -20px", padding: "20px", borderRadius: "0 0 16px 16px" }}>
+          <h4 style={{ fontSize: "11px", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "12px", margin: "0 0 12px 0" }}>
+            Detected Issues
+          </h4>
+          {issues.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {issues.map((issue, idx) => (
+                <p key={idx} style={{ fontSize: "12px", lineHeight: "1.4", margin: 0, color: issue.color }}>
+                  <strong style={{ display: "block", marginBottom: "2px", fontWeight: 700 }}>{issue.label}</strong>
+                  <span style={{ color: "#475569" }}>{issue.text}</span>
+                </p>
+              ))}
+            </div>
+          ) : (
+            <p style={{ fontSize: "12px", color: "#059669", lineHeight: "1.4", margin: 0, fontWeight: 500 }}>
+              Model geometry is solid. Ready for slicing.
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );
 }
-
-
-
-
-
 export function CameraResetController({ resetTrigger }: { resetTrigger: number }) {
   const { camera, controls } = useThree();
   const lastTrigger = useRef(resetTrigger);
   const isAnimating = useRef(false);
-
   const targetCamPos = useMemo(() => new THREE.Vector3(200, -200, 200), []);
   const targetLookAt = useMemo(() => new THREE.Vector3(0, 0, 0), []);
-
   if (resetTrigger !== lastTrigger.current) {
     lastTrigger.current = resetTrigger;
     isAnimating.current = true;
   }
-
   useFrame((_, delta) => {
     if (!isAnimating.current) return;
-
     const step = Math.min(1, 10 * delta);
     camera.position.lerp(targetCamPos, step);
-
     if (controls && "target" in controls && controls.target) {
       const orbControls = controls as any;
       orbControls.target.lerp(targetLookAt, step);
@@ -285,7 +326,6 @@ export function CameraResetController({ resetTrigger }: { resetTrigger: number }
     } else {
       camera.lookAt(targetLookAt);
     }
-
     if (camera.position.distanceTo(targetCamPos) < 0.5) {
       camera.position.copy(targetCamPos);
       if (controls && "target" in controls && controls.target) {
@@ -295,10 +335,8 @@ export function CameraResetController({ resetTrigger }: { resetTrigger: number }
       isAnimating.current = false;
     }
   });
-
   return null;
 }
-
 interface BottomWheelPanelProps {
   printerIdx: number;
   materialIdx: number;
@@ -314,7 +352,6 @@ interface BottomWheelPanelProps {
   onWallChange: (idx: number) => void;
   onInfillChange: (idx: number) => void;
 }
-
 export function BottomWheelPanel({
   printerIdx,
   materialIdx,
@@ -355,15 +392,12 @@ export function BottomWheelPanel({
     </div>
   );
 }
-
 interface RightPresetWheelProps {
   presetIdx: number;
   onPresetChange: (idx: number) => void;
 }
-
 export function RightPresetWheel({ presetIdx, onPresetChange }: RightPresetWheelProps) {
   const presetOptions = useMemo(() => PRESETS.map((p, idx) => ({ ...p, value: idx })), []);
-
   return (
     <div
       style={{
@@ -388,11 +422,6 @@ export function RightPresetWheel({ presetIdx, onPresetChange }: RightPresetWheel
     </div>
   );
 }
-
-
-
-
-
 export default function App() {
   const [currentModel, setCurrentModel] = useState<any>(null);
   const [fileName, setFileName] = useState<string>("");
@@ -400,7 +429,6 @@ export default function App() {
   const [useInches, setUseInches] = useState<boolean>(false);
   const [spoolPrice, setSpoolPrice] = useState<number>(25);
   const [filamentKey, setFilamentKey] = useState<string>("PLA");
-
   const [printerIdx, setPrinterIdx] = useState(0);
   const [materialIdx, setMaterialIdx] = useState(0);
   const [nozzleIdx, setNozzleIdx] = useState(1);
@@ -409,51 +437,38 @@ export default function App() {
   const [infillIdx, setInfillIdx] = useState(2);
   const [presetIdx, setPresetIdx] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
   const nozzleDiameterMm = NOZZLE_OPTIONS[nozzleIdx].value;
   const currentLayerOptions = LAYER_OPTIONS_BY_NOZZLE[nozzleDiameterMm] || LAYER_OPTIONS_BY_NOZZLE[0.4];
-
   const safeLayerIdx = Math.min(layerIdx, currentLayerOptions.length - 1);
   const activeLayerObj = currentLayerOptions[safeLayerIdx] || currentLayerOptions[0];
   const layerHeightMm = activeLayerObj.value;
-
   const wallLoopCount = WALL_OPTIONS[wallIdx].value;
   const infill = INFILL_OPTIONS[infillIdx].value;
-
   const [topLayerCount] = useState<number>(7);
   const [bottomLayerCount] = useState<number>(5);
-
   const [analysis, setAnalysis] = useState<any>(null);
   const [activeHeatmap, setActiveHeatmap] = useState<"none" | "overhang" | "stress" | "thinWall">("none");
   const [resetCounter, setResetCounter] = useState<number>(0);
   const [showHoles, setShowHoles] = useState<boolean>(false);
   const [showBedBounds, setShowBedBounds] = useState<boolean>(true);
   const [holeAnalysis, setHoleAnalysis] = useState<{ hasHoles: boolean; openEdgeCount: number } | null>(null);
-
-  
   const currentPrinterBed = PRINTER_OPTIONS[printerIdx].bedSize;
-
   const printability = useMemo(() => {
-    return calculatePrintabilityScore(analysis, holeAnalysis, currentPrinterBed, nozzleDiameterMm);
+    return calculatePrintabilityScore(analysis, holeAnalysis, currentPrinterBed);
   }, [analysis, holeAnalysis, currentPrinterBed, nozzleDiameterMm]);
-
   const applyPreset = (idx: number) => {
     setPresetIdx(idx);
     const selectedPreset = PRESETS[idx];
     if (!selectedPreset) return;
-
     const availableLayerVals = currentLayerOptions.map((opt) => opt.value);
     const targetLayerHeight = selectedPreset.targetRatio * nozzleDiameterMm;
     const closestLayerIdx = getClosestIndex(availableLayerVals, targetLayerHeight);
     setLayerIdx(closestLayerIdx);
-
     const targetWallIdx = WALL_OPTIONS.findIndex((w) => w.value === selectedPreset.walls);
     if (targetWallIdx !== -1) setWallIdx(targetWallIdx);
-
     const targetInfillIdx = INFILL_OPTIONS.findIndex((i) => i.value === selectedPreset.infill);
     if (targetInfillIdx !== -1) setInfillIdx(targetInfillIdx);
   };
-
   const handlePrinterChange = (idx: number) => {
     setPrinterIdx(idx);
     const selectedPrinter = PRINTER_OPTIONS[idx];
@@ -466,7 +481,6 @@ export default function App() {
       setInfillIdx(selectedPrinter.defaults.infill);
     }
   };
-
   const handleMaterialChange = (idx: number) => {
     setMaterialIdx(idx);
     const selectedMat = MATERIAL_OPTIONS[idx];
@@ -474,23 +488,19 @@ export default function App() {
       setFilamentKey(selectedMat.value);
     }
   };
-
   const handleNozzleChange = (newNozzleIdx: number) => {
     setNozzleIdx(newNozzleIdx);
     const newNozzleVal = NOZZLE_OPTIONS[newNozzleIdx].value;
     const availableHeights = LAYER_OPTIONS_BY_NOZZLE[newNozzleVal] || LAYER_OPTIONS_BY_NOZZLE[0.4];
-
     const targetHeight = newNozzleVal * 0.5;
     const availableLayerVals = availableHeights.map((opt) => opt.value);
     setLayerIdx(getClosestIndex(availableLayerVals, targetHeight));
-
     const recommendedWalls = Math.max(1, Math.round(1.2 / (newNozzleVal * 1.1)));
     const matchingWallIdx = WALL_OPTIONS.findIndex((w) => w.value === recommendedWalls);
     if (matchingWallIdx !== -1) {
       setWallIdx(matchingWallIdx);
     }
   };
-
   const handleFileUpload = (e: any) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -501,7 +511,6 @@ export default function App() {
       setCurrentModel({ objectUrl, format: ext, fileName: file.name });
     }
   };
-
   const handleExportSettings = () => {
     const exportData = {
       generator: "SlicingLab Configurator",
@@ -528,7 +537,6 @@ export default function App() {
           }
         : null,
     };
-
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -537,19 +545,16 @@ export default function App() {
     a.click();
     URL.revokeObjectURL(url);
   };
-
   useEffect(() => {
     return () => {
       if (currentModel?.objectUrl) URL.revokeObjectURL(currentModel.objectUrl);
     };
   }, [currentModel]);
-
   const customAxesHelper = useMemo(() => {
     const group = new THREE.Group();
     const xGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-150, 0, 0), new THREE.Vector3(150, 0, 0)]);
     const yGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, -150, 0), new THREE.Vector3(0, 150, 0)]);
     const zGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 150)]);
-
     const lineMat = (color: number) =>
       new THREE.LineBasicMaterial({
         color,
@@ -560,21 +565,16 @@ export default function App() {
         polygonOffsetFactor: -1,
         polygonOffsetUnits: -1,
       });
-
     const lineX = new THREE.Line(xGeom, lineMat(0xef4444));
     const lineY = new THREE.Line(yGeom, lineMat(0x22c55e));
     const lineZ = new THREE.Line(zGeom, lineMat(0x3b82f6));
-
     group.add(lineX, lineY, lineZ);
     return group;
   }, []);
-
-  
   const bedBoundsMesh = useMemo(() => {
     const { x, y, z } = currentPrinterBed;
     const geometry = new THREE.BoxGeometry(x, y, z);
     geometry.translate(0, 0, z / 2);
-    
     const material = new THREE.LineBasicMaterial({
       color: 0x94a3b8,
       transparent: true,
@@ -582,21 +582,16 @@ export default function App() {
       depthWrite: true,
       depthTest: true,
     });
-    
     const lines = new THREE.LineSegments(new THREE.WireframeGeometry(geometry), material);
     lines.renderOrder = -1;
     return lines;
   }, [currentPrinterBed.x, currentPrinterBed.y, currentPrinterBed.z]);
-
-  
   const maxGridSize = Math.max(currentPrinterBed.x, currentPrinterBed.y);
   const gridDivisions = Math.round(maxGridSize / 10);
-
   const formatDim = (val: number) => (useInches ? (val / 25.4).toFixed(2) + " in" : val.toFixed(1) + " mm");
   const formatVolume = (val: number) => (useInches ? (val / 16387).toFixed(2) + " in³" : (val / 1000).toFixed(1) + " cm³");
   const formatWeight = (est: any) => (est ? `${est.weightGrams.toFixed(1)} g` : "0 g");
   const formatCost = (est: any) => (est ? `$${est.cost.toFixed(2)}` : "$0.00");
-
   const calculatePrintTime = () => {
     if (!analysis || !analysis.volume) return "0h 0m";
     const volumeCm3 = analysis.volume / 1000;
@@ -605,8 +600,7 @@ export default function App() {
     const totalSeconds = (totalExtrudedCm3 * 1000) / 8;
     return `${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`;
   };
-
-  return (
+return (
     <div style={{ width: "100vw", height: "100vh", position: "relative" }}>
       <Canvas
         shadows
@@ -622,8 +616,6 @@ export default function App() {
         <ambientLight intensity={0.9} />
         <directionalLight position={[100, -100, 150]} intensity={1.5} castShadow />
         <pointLight position={[-50, 50, 50]} intensity={0.4} />
-
-        {/* Force grid reconstruction on size change using a key */}
         <gridHelper
           key={`grid-${maxGridSize}`}
           args={[maxGridSize, gridDivisions, "#e2e2e0", "#e2e2e0"]}
@@ -631,10 +623,8 @@ export default function App() {
           rotation={[Math.PI / 2, 0, 0]}
           renderOrder={-1}
         />
-
         <primitive object={customAxesHelper} />
         {showBedBounds && <primitive object={bedBoundsMesh} />}
-
         <Suspense fallback={null}>
           {currentModel && (
             <Model
@@ -657,15 +647,10 @@ export default function App() {
             />
           )}
         </Suspense>
-
         <OrbitControls makeDefault minDistance={1} maxDistance={1000} />
         <CameraResetController resetTrigger={resetCounter} />
       </Canvas>
-
-      {/* TOP FLOATING SCORE PILL */}
       <ScorePill printability={printability} />
-
-      {/* BOTTOM CONTROL WHEELS */}
       <BottomWheelPanel
         printerIdx={printerIdx}
         materialIdx={materialIdx}
@@ -681,11 +666,7 @@ export default function App() {
         onWallChange={setWallIdx}
         onInfillChange={setInfillIdx}
       />
-
-      {/* RIGHT PRESET WHEEL */}
       <RightPresetWheel presetIdx={presetIdx} onPresetChange={applyPreset} />
-
-      {/* UPLOAD BUTTON */}
       <div style={{ position: "absolute", top: 20, left: 20, zIndex: 10 }}>
         <input type="file" ref={fileInputRef} accept=".stl" onChange={handleFileUpload} style={{ display: "none" }} />
         <button
@@ -718,8 +699,6 @@ export default function App() {
           </div>
         )}
       </div>
-
-      {/* TOP RIGHT HEATMAP & TOGGLE CONTROLS */}
       {currentModel && (
         <div style={{ position: "absolute", top: 20, right: 20, zIndex: 10, display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -729,16 +708,13 @@ export default function App() {
               </div>
             )}
           </div>
-
           <div style={{ display: "flex", gap: 8 }}>
             {HEATMAP_MODES.map(({ key, label }) => {
               const isActive = activeHeatmap === key;
               const shortLabel = key === "none" ? "OFF" : key === "overhang" ? "OVH" : key === "stress" ? "STR" : "THN";
-
               let bgGradient = "rgba(255, 255, 255, 0.95)";
               let textColor = "var(--text-primary)";
               let shadowStyle = "0 4px 12px rgba(0, 0, 0, 0.05)";
-
               if (isActive) {
                 textColor = "#fff";
                 shadowStyle = "0 6px 16px rgba(0, 0, 0, 0.15)";
@@ -747,7 +723,6 @@ export default function App() {
                 else if (key === "stress") bgGradient = "linear-gradient(180deg, #facc15 0%, #ea580c 100%)";
                 else if (key === "thinWall") bgGradient = "linear-gradient(180deg, #f43f5e 0%, #be123c 100%)";
               }
-
               return (
                 <button
                   key={key}
@@ -778,7 +753,6 @@ export default function App() {
               );
             })}
           </div>
-
           <div style={{ display: "flex", gap: 8 }}>
             <button
               onClick={() => setShowBedBounds(!showBedBounds)}
@@ -802,7 +776,6 @@ export default function App() {
             >
               {showBedBounds ? "Hide Build Volume" : "Show Build Volume"}
             </button>
-
             <button
               onClick={() => setShowHoles(!showHoles)}
               onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.04)")}
@@ -826,7 +799,6 @@ export default function App() {
               {showHoles ? "Hide Hole Check" : "Check for Holes"}
             </button>
           </div>
-
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
             <button
               onClick={() => setResetCounter((c) => c + 1)}
@@ -853,7 +825,6 @@ export default function App() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
               </svg>
             </button>
-
             <button
               onClick={() => setWireframe(!wireframe)}
               onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
@@ -879,7 +850,6 @@ export default function App() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
               </svg>
             </button>
-
             <button
               onClick={() => setUseInches(!useInches)}
               onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
@@ -908,67 +878,63 @@ export default function App() {
           </div>
         </div>
       )}
-
-      {/* LEFT SIDEBAR: METRICS & EXPORT */}
       <div className="sidebar-container" style={{ position: "absolute", top: 88, left: 20, zIndex: 10 }}>
         <div className="apple-card">
           <div className="card-title">
             <span>Analysis & Slicing</span>
           </div>
-
           {analysis ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4, background: "rgba(0,0,0,0.02)", padding: "10px 6px", borderRadius: 12 }}>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}><span style={{ fontSize: "10px", color: "var(--text-tertiary)", fontWeight: 700 }}>X</span><span style={{ fontWeight: 600, fontSize: "13px" }}>{formatDim(analysis.x)}</span></div>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", borderLeft: "1px solid var(--divider)", borderRight: "1px solid var(--divider)" }}><span style={{ fontSize: "10px", color: "var(--text-tertiary)", fontWeight: 700 }}>Y</span><span style={{ fontWeight: 600, fontSize: "13px" }}>{formatDim(analysis.y)}</span></div>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}><span style={{ fontSize: "10px", color: "var(--text-tertiary)", fontWeight: 700 }}>Z</span><span style={{ fontWeight: 600, fontSize: "13px" }}>{formatDim(analysis.z)}</span></div>
-              </div>
-
-              <div>
-                <div className="metric-row"><span className="metric-label">Volume</span><span className="metric-value">{formatVolume(analysis.volume)}</span></div>
-                <div className="metric-row"><span className="metric-label">Est. Weight</span><span className="metric-value">{formatWeight(analysis.materialEstimate)}</span></div>
-                <div className="metric-row"><span className="metric-label">Est. Cost</span><span className="metric-value" style={{ color: "var(--accent-blue)" }}>{formatCost(analysis.materialEstimate)}</span></div>
-                <div className="metric-row"><span className="metric-label">Est. Print Time</span><span className="metric-value">{calculatePrintTime()}</span></div>
-                <div className="metric-row"><span className="metric-label">Triangles</span><span className="metric-value">{analysis.triangles.toLocaleString()}</span></div>
-              </div>
-
-              <div className="slider-group">
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
-                  <span className="metric-label">Spool Price (1kg)</span>
-                  <span className="metric-value">${spoolPrice}</span>
+            <>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4, background: "rgba(0,0,0,0.02)", padding: "10px 6px", borderRadius: 12 }}>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}><span style={{ fontSize: "10px", color: "var(--text-tertiary)", fontWeight: 700 }}>X</span><span style={{ fontWeight: 600, fontSize: "13px" }}>{formatDim(analysis.x)}</span></div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", borderLeft: "1px solid var(--divider)", borderRight: "1px solid var(--divider)" }}><span style={{ fontSize: "10px", color: "var(--text-tertiary)", fontWeight: 700 }}>Y</span><span style={{ fontWeight: 600, fontSize: "13px" }}>{formatDim(analysis.y)}</span></div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}><span style={{ fontSize: "10px", color: "var(--text-tertiary)", fontWeight: 700 }}>Z</span><span style={{ fontWeight: 600, fontSize: "13px" }}>{formatDim(analysis.z)}</span></div>
                 </div>
-                <input type="range" min="10" max="60" step="1" value={spoolPrice} onChange={(e) => setSpoolPrice(Number(e.target.value))} className="apple-slider" />
+                <div>
+                  <div className="metric-row"><span className="metric-label">Volume</span><span className="metric-value">{formatVolume(analysis.volume)}</span></div>
+                  <div className="metric-row"><span className="metric-label">Est. Weight</span><span className="metric-value">{formatWeight(analysis.materialEstimate)}</span></div>
+                  <div className="metric-row"><span className="metric-label">Est. Cost</span><span className="metric-value" style={{ color: "var(--accent-blue)" }}>{formatCost(analysis.materialEstimate)}</span></div>
+                  <div className="metric-row"><span className="metric-label">Est. Print Time</span><span className="metric-value">{calculatePrintTime()}</span></div>
+                  <div className="metric-row"><span className="metric-label">Triangles</span><span className="metric-value">{analysis.triangles.toLocaleString()}</span></div>
+                </div>
+                <div className="slider-group">
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
+                    <span className="metric-label">Spool Price (1kg)</span>
+                    <span className="metric-value">${spoolPrice}</span>
+                  </div>
+                  <input type="range" min="10" max="60" step="1" value={spoolPrice} onChange={(e) => setSpoolPrice(Number(e.target.value))} className="apple-slider" />
+                </div>
+                <button
+                  onClick={handleExportSettings}
+                  onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.02)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+                  style={{
+                    width: "100%",
+                    height: 40,
+                    borderRadius: 12,
+                    border: "none",
+                    background: "var(--accent-blue)",
+                    color: "#fff",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 6,
+                    marginTop: 4,
+                    boxShadow: "0 4px 12px rgba(0, 102, 204, 0.25)",
+                    transition: "transform 0.2s ease, background 0.2s ease",
+                  }}
+                >
+                  <svg style={{ width: 16, height: 16 }} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Export Print Profile (.json)
+                </button>
               </div>
-
-              <button
-                onClick={handleExportSettings}
-                onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.02)")}
-                onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
-                style={{
-                  width: "100%",
-                  height: 40,
-                  borderRadius: 12,
-                  border: "none",
-                  background: "var(--accent-blue)",
-                  color: "#fff",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 6,
-                  marginTop: 4,
-                  boxShadow: "0 4px 12px rgba(0, 102, 204, 0.25)",
-                  transition: "transform 0.2s ease, background 0.2s ease",
-                }}
-              >
-                <svg style={{ width: 16, height: 16 }} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Export Print Profile (.json)
-              </button>
-            </div>
+            </>
           ) : (
             <div style={{ fontSize: "12px", color: "var(--text-secondary)", textAlign: "center", padding: "12px 0", fontWeight: 500 }}>
               Upload an STL model to analyze mesh metrics.
@@ -977,5 +943,4 @@ export default function App() {
         </div>
       </div>
     </div>
-  );
-}
+  );}
