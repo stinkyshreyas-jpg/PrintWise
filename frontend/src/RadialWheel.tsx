@@ -15,7 +15,7 @@ interface RadialWheelProps {
   offsetX?: number;
   offsetY?: number;
   iconSize?: number;
-  orientation?: "bottom" | "right" | "left";
+  orientation?: "bottom" | "top" | "right" | "left";
   showCenterText?: boolean;
   fontSizeSelected?: string;
   fontSizeUnselected?: string;
@@ -41,6 +41,7 @@ export default function RadialWheel({
 }: RadialWheelProps) {
   const isRight = orientation === "right";
   const isLeft = orientation === "left";
+  const isTop = orientation === "top";
   const isHorizontal = isRight || isLeft;
 
   const wheelAreaRef = useRef<HTMLDivElement>(null);
@@ -170,6 +171,8 @@ export default function RadialWheel({
     centerTextX = radius + innerRadius / 2.3;
   } else if (isLeft) {
     centerTextX = radius - innerRadius / 2.3;
+  } else if (isTop) {
+    centerTextY = radius + innerRadius / 2.3;
   } else {
     centerTextY = radius - innerRadius / 2.3;
   }
@@ -190,16 +193,19 @@ export default function RadialWheel({
     } else if (isLeft) {
       const slideX = isVisible ? "-10px" : `-${radius + 10}px`;
       return `${baseTranslate} translateX(${slideX}) ${scale}`;
+    } else if (isTop) {
+      const slideY = isVisible ? "-10px" : `-${radius + 10}px`;
+      return `${baseTranslate} translateY(${slideY}) ${scale}`;
     } else {
       const slideY = isVisible ? "10px" : `${radius + 10}px`;
       return `${baseTranslate} translateY(${slideY}) ${scale}`;
     }
   };
 
-  // Determine flex direction and order for left vs right
   const getFlexDirection = () => {
     if (isRight) return "row";
     if (isLeft) return "row-reverse";
+    if (isTop) return "column-reverse";
     return "column";
   };
 
@@ -214,9 +220,15 @@ export default function RadialWheel({
         justifyContent: "flex-end",
         position: "relative",
         transform: getTransform(),
-        transformOrigin: isRight ? "right center" : isLeft ? "left center" : "bottom center",
+        transformOrigin: isRight
+          ? "right center"
+          : isLeft
+          ? "left center"
+          : isTop
+          ? "top center"
+          : "bottom center",
         transition: "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1)",
-        zIndex: isVisible ? 20 : 1,
+        zIndex: isVisible ? 2 : 1, // Kept below 10 so it hides behind the Analysis panel above
         padding: "8px",
       }}
     >
@@ -227,7 +239,8 @@ export default function RadialWheel({
           textTransform: "uppercase",
           letterSpacing: "0.06em",
           color: isVisible ? "var(--accent-blue)" : "var(--text-tertiary)",
-          marginBottom: isHorizontal ? "0" : "6px",
+          marginBottom: isHorizontal ? "0" : isTop ? "0" : "6px",
+          marginTop: isTop ? "6px" : "0",
           marginRight: isRight ? "8px" : "0",
           marginLeft: isLeft ? "8px" : "0",
           transition: "color 0.2s ease",
@@ -261,9 +274,15 @@ export default function RadialWheel({
           viewBox={`0 0 ${size} ${size}`}
           style={{
             position: "absolute",
-            top: 0,
+            top: isTop ? `-${radius}px` : 0,
             left: isLeft ? `-${radius}px` : 0,
-            transform: isRight ? "rotate(-90deg)" : isLeft ? "rotate(90deg)" : "none",
+            transform: isRight
+              ? "rotate(-90deg)"
+              : isLeft
+              ? "rotate(90deg)"
+              : isTop
+              ? "rotate(180deg)"
+              : "none",
             transformOrigin: `${radius}px ${radius}px`,
           }}
         >
@@ -287,6 +306,7 @@ export default function RadialWheel({
               let textRotation = -rotationDeg;
               if (isRight) textRotation = -rotationDeg + 90;
               if (isLeft) textRotation = -rotationDeg - 90;
+              if (isTop) textRotation = -rotationDeg - 180;
 
               return (
                 <g key={i} onClick={() => handleSectorClick(i)} style={{ cursor: "pointer" }}>
@@ -344,6 +364,8 @@ export default function RadialWheel({
                   ? `rotate(90, ${centerTextX}, ${centerTextY})`
                   : isLeft
                   ? `rotate(-90, ${centerTextX}, ${centerTextY})`
+                  : isTop
+                  ? `rotate(180, ${centerTextX}, ${centerTextY})`
                   : undefined
               }
               style={{ pointerEvents: "none" }}
