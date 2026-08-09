@@ -393,12 +393,14 @@ interface BottomWheelPanelProps {
   layerOptions: { label: string; value: number }[];
   wallIdx: number;
   infillIdx: number;
+  infillPatternIdx: number;
   onPrinterChange: (idx: number) => void;
   onMaterialChange: (idx: number) => void;
   onNozzleChange: (idx: number) => void;
   onLayerChange: (idx: number) => void;
   onWallChange: (idx: number) => void;
   onInfillChange: (idx: number) => void;
+  onInfillPatternChange: (idx: number) => void;
 }
 
 export function BottomWheelPanel({
@@ -409,36 +411,70 @@ export function BottomWheelPanel({
   layerOptions,
   wallIdx,
   infillIdx,
+  infillPatternIdx,
   onPrinterChange,
   onMaterialChange,
   onNozzleChange,
   onLayerChange,
   onWallChange,
   onInfillChange,
+  onInfillPatternChange,
 }: BottomWheelPanelProps) {
   return (
-    <div
-      style={{
-        position: "fixed",
-        bottom: 1,
-        left: "50%",
-        transform: "translateX(-50%)",
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "flex-end",
-        gap: "16px",
-        zIndex: 50,
-        padding: 0,
-        margin: 0,
-      }}
-    >
-      <RadialWheel title="Printer" options={PRINTER_OPTIONS} selectedIndex={printerIdx} onChange={onPrinterChange} iconSize={64} autoHide={true} />
-      <RadialWheel title="Material" options={MATERIAL_OPTIONS} selectedIndex={materialIdx} onChange={onMaterialChange} iconSize={64} autoHide={true} />
-      <RadialWheel title="Nozzle" options={NOZZLE_OPTIONS} selectedIndex={nozzleIdx} onChange={onNozzleChange} autoHide={true} />
-      <RadialWheel title="Layer Height" options={layerOptions} selectedIndex={layerIdx < layerOptions.length ? layerIdx : 0} onChange={onLayerChange} autoHide={true} />
-      <RadialWheel title="Wall Loops" options={WALL_OPTIONS} selectedIndex={wallIdx} onChange={onWallChange} autoHide={true} />
-      <RadialWheel title="Infill Density" options={INFILL_OPTIONS} selectedIndex={infillIdx} onChange={onInfillChange} autoHide={true} />
-    </div>
+    <>
+      <style>{`
+        .bottom-wheel-container {
+          position: fixed;
+          bottom: 4px;
+          left: 50%;
+          transform: translateX(-50%);
+          display: flex;
+          flex-direction: row;
+          align-items: flex-end;
+          justify-content: center;
+          gap: clamp(4px, 1vw, 12px);
+          max-width: 98vw;
+          z-index: 50;
+          padding: 0 8px;
+          margin: 0;
+          transition: transform 0.2s ease, gap 0.2s ease;
+        }
+
+        /* Responsive scaling for standard 1366px & 1440px laptops */
+        @media (max-width: 1440px) {
+          .bottom-wheel-container {
+            transform: translateX(-50%) scale(0.88);
+            transform-origin: bottom center;
+          }
+        }
+
+        /* Responsive scaling for 1280px and smaller laptops */
+        @media (max-width: 1280px) {
+          .bottom-wheel-container {
+            transform: translateX(-50%) scale(0.78);
+            transform-origin: bottom center;
+          }
+        }
+
+        /* Compact fallback for smaller screens */
+        @media (max-width: 1024px) {
+          .bottom-wheel-container {
+            transform: translateX(-50%) scale(0.68);
+            transform-origin: bottom center;
+          }
+        }
+      `}</style>
+
+      <div className="bottom-wheel-container">
+        <RadialWheel title="Printer" options={PRINTER_OPTIONS} selectedIndex={printerIdx} onChange={onPrinterChange} iconSize={64} autoHide={true} />
+        <RadialWheel title="Material" options={MATERIAL_OPTIONS} selectedIndex={materialIdx} onChange={onMaterialChange} iconSize={64} autoHide={true} />
+        <RadialWheel title="Nozzle" options={NOZZLE_OPTIONS} selectedIndex={nozzleIdx} onChange={onNozzleChange} autoHide={true} />
+        <RadialWheel title="Layer Height" options={layerOptions} selectedIndex={layerIdx < layerOptions.length ? layerIdx : 0} onChange={onLayerChange} autoHide={true} />
+        <RadialWheel title="Wall Loops" options={WALL_OPTIONS} selectedIndex={wallIdx} onChange={onWallChange} autoHide={true} />
+        <RadialWheel title="Infill Density" options={INFILL_OPTIONS} selectedIndex={infillIdx} onChange={onInfillChange} autoHide={true} />
+        <RadialWheel title="Infill Pattern" options={INFILL_PATTERN_OPTIONS} selectedIndex={infillPatternIdx} onChange={onInfillPatternChange} iconSize={20} autoHide={true} />
+      </div>
+    </>
   );
 }
 
@@ -699,7 +735,6 @@ Generated At: ${new Date().toLocaleString()}
   };
 
   return (
-    
     <div style={{ width: "100vw", height: "100vh", position: "relative" }}>
       <Canvas
         shadows
@@ -760,12 +795,14 @@ Generated At: ${new Date().toLocaleString()}
         layerOptions={currentLayerOptions}
         wallIdx={wallIdx}
         infillIdx={infillIdx}
+        infillPatternIdx={infillPatternIdx}
         onPrinterChange={handlePrinterChange}
         onMaterialChange={handleMaterialChange}
         onNozzleChange={handleNozzleChange}
         onLayerChange={setLayerIdx}
         onWallChange={setWallIdx}
         onInfillChange={setInfillIdx}
+        onInfillPatternChange={setInfillPatternIdx}
       />
 
       <RightPresetWheel presetIdx={presetIdx} onPresetChange={applyPreset} />
@@ -1173,7 +1210,6 @@ Generated At: ${new Date().toLocaleString()}
             </div>
           )}
         </div>
-       
       </div>
     </div>
   );
