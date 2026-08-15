@@ -20,7 +20,20 @@
   --divider: rgba(55, 53, 47, 0.09);
   --slider-track: #eaeaea;
 }
+/* Global CSS File (e.g., globals.css / App.css) */
 
+:root {
+  --wheel-sector-bg: #e5e7eb;
+  --wheel-center-bg: #f3f4f6;
+  --wheel-border: #ffffff;
+}
+
+.dark,
+[data-theme="dark"] {
+  --wheel-sector-bg: #1e2430;
+  --wheel-center-bg: #0d1117;
+  --wheel-border: rgba(255, 255, 255, 0.1);
+}
 
 @font-face {
   font-family: 'SF Pro Display';

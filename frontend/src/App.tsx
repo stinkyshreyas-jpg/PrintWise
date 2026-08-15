@@ -2,8 +2,118 @@ import React, { Suspense, useState, useRef, useMemo, useEffect } from "react";
 import * as THREE from "three";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
+import ClipperLib from "clipper-lib";
 import Model from "./Model";
 import RadialWheel from "./RadialWheel";
+
+const CLIPPER_SCALE = 1000;
+
+export interface Point2D {
+  x: number;
+  y: number;
+}
+
+// Define explicit interfaces if ambient types are missing
+export interface IntPoint {
+  X: number;
+  Y: number;
+}
+export type Path = IntPoint[];
+export type Paths = Path[];
+
+export function generatePerimetersClipper(
+  rawContours: Point2D[][],
+  wallCount: number,
+  nozzleWidthMm: number
+): Point2D[][][] {
+  let currentPolygons: Paths = rawContours.map((poly) =>
+    poly.map((pt) => ({
+      X: Math.round(pt.x * CLIPPER_SCALE),
+      Y: Math.round(pt.y * CLIPPER_SCALE),
+    }))
+  );
+  
+  const perimeterLayers: Point2D[][][] = [];
+  const delta = -Math.round((nozzleWidthMm / 2) * CLIPPER_SCALE);
+
+  for (let i = 0; i < wallCount; i++) {
+    const co = new ClipperLib.ClipperOffset();
+    const solution: Paths = [];
+
+    co.AddPaths(
+      currentPolygons,
+      ClipperLib.JoinType.jtMiter,
+      ClipperLib.EndType.etClosedPolygon
+    );
+
+    co.Execute(solution, delta);
+
+    if (solution.length === 0) break;
+
+    const floatSolution: Point2D[][] = solution.map((path: Path) =>
+      path.map((pt: IntPoint) => ({ x: pt.X / CLIPPER_SCALE, y: pt.Y / CLIPPER_SCALE }))
+    );
+
+    perimeterLayers.push(floatSolution);
+    currentPolygons = solution;
+  }
+
+  return perimeterLayers;
+}
+
+/**
+ * Clips pre-generated infill lines against inner boundary polygons using ClipperLib intersection.
+ */
+export function generateInfillClipper(
+  innerBoundaryPolys: Point2D[][],
+  infillLines: Point2D[][]
+): Point2D[][] {
+  const c = new ClipperLib.Clipper();
+  const solution = new (ClipperLib as any).PolyTree();
+
+  const clipperBoundaries = innerBoundaryPolys.map((poly) =>
+    poly.map((pt) => ({
+      X: Math.round(pt.x * CLIPPER_SCALE),
+      Y: Math.round(pt.y * CLIPPER_SCALE),
+    }))
+  );
+
+  const clipperLines = infillLines.map((line) =>
+    line.map((pt) => ({
+      X: Math.round(pt.x * CLIPPER_SCALE),
+      Y: Math.round(pt.y * CLIPPER_SCALE),
+    }))
+  );
+
+  c.AddPaths(clipperBoundaries, ClipperLib.PolyType.ptSubject, true);
+  c.AddPaths(clipperLines, ClipperLib.PolyType.ptClip, false);
+
+  c.Execute(
+    ClipperLib.ClipType.ctIntersection,
+    solution,
+    ClipperLib.PolyFillType.pftNonZero,
+    ClipperLib.PolyFillType.pftNonZero
+  );
+
+  const outputLines: Point2D[][] = [];
+  const collectPaths = (node: any) => {
+    if (node.Contour && node.Contour().length > 0) {
+      outputLines.push(
+        node.Contour().map((pt: { X: number; Y: number }) => ({
+          x: pt.X / CLIPPER_SCALE,
+          y: pt.Y / CLIPPER_SCALE,
+        }))
+      );
+    }
+    const children = node.Childs();
+    for (let i = 0; i < children.length; i++) {
+      collectPaths(children[i]);
+    }
+  };
+
+  collectPaths(solution);
+  return outputLines;
+}
 
 export const PRESETS = [
   { value: "balanced", label: "Balanced", targetRatio: 0.50, walls: 3, infill: 15, patternIdx: 0 },
@@ -448,7 +558,6 @@ export function BottomWheelPanel({
           transition: transform 0.2s ease, gap 0.2s ease;
         }
 
-        /* Responsive scaling for standard 1366px & 1440px laptops */
         @media (max-width: 1440px) {
           .bottom-wheel-container {
             transform: translateX(-50%) scale(0.88);
@@ -456,7 +565,6 @@ export function BottomWheelPanel({
           }
         }
 
-        /* Responsive scaling for 1280px and smaller laptops */
         @media (max-width: 1280px) {
           .bottom-wheel-container {
             transform: translateX(-50%) scale(0.78);
@@ -464,7 +572,6 @@ export function BottomWheelPanel({
           }
         }
 
-        /* Compact fallback for smaller screens */
         @media (max-width: 1024px) {
           .bottom-wheel-container {
             transform: translateX(-50%) scale(0.68);
@@ -760,6 +867,13 @@ Generated At: ${new Date().toLocaleString()}
           --text-secondary: #475569;
           --text-tertiary: #94a3b8;
           --accent-blue: #2563eb;
+<<<<<<< HEAD
+=======
+
+          --wheel-sector-bg: #e2e8f0;
+          --wheel-center-bg: #ffffff;
+          --wheel-border: #fbfbfa;
+>>>>>>> baf04b8 (ClipperLib optimizing slicer with faster comptue times and better time complexity)
         }
 
         .dark-theme {
@@ -774,6 +888,13 @@ Generated At: ${new Date().toLocaleString()}
           --text-secondary: #cbd5e1;
           --text-tertiary: #64748b;
           --accent-blue: #3b82f6;
+<<<<<<< HEAD
+=======
+
+          --wheel-sector-bg: #334155;
+          --wheel-center-bg: #1e293b;
+          --wheel-border: #0f172a;
+>>>>>>> baf04b8 (ClipperLib optimizing slicer with faster comptue times and better time complexity)
         }
 
         .apple-card {
@@ -828,7 +949,10 @@ Generated At: ${new Date().toLocaleString()}
           width: 100%;
         }
 
+<<<<<<< HEAD
         /* Custom Dark/Light scrollbar */
+=======
+>>>>>>> baf04b8 (ClipperLib optimizing slicer with faster comptue times and better time complexity)
         ::-webkit-scrollbar {
           width: 6px;
           height: 6px;
