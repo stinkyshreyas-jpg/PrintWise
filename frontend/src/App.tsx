@@ -5,22 +5,17 @@ import { OrbitControls } from "@react-three/drei";
 import ClipperLib from "clipper-lib";
 import Model from "./Model";
 import RadialWheel from "./RadialWheel";
-
 const CLIPPER_SCALE = 1000;
-
 export interface Point2D {
   x: number;
   y: number;
 }
-
-// Define explicit interfaces if ambient types are missing
 export interface IntPoint {
   X: number;
   Y: number;
 }
 export type Path = IntPoint[];
 export type Paths = Path[];
-
 export function generatePerimetersClipper(
   rawContours: Point2D[][],
   wallCount: number,
@@ -32,35 +27,26 @@ export function generatePerimetersClipper(
       Y: Math.round(pt.y * CLIPPER_SCALE),
     }))
   );
-  
   const perimeterLayers: Point2D[][][] = [];
   const delta = -Math.round((nozzleWidthMm / 2) * CLIPPER_SCALE);
-
   for (let i = 0; i < wallCount; i++) {
     const co = new ClipperLib.ClipperOffset();
     const solution: Paths = [];
-
     co.AddPaths(
       currentPolygons,
       ClipperLib.JoinType.jtMiter,
       ClipperLib.EndType.etClosedPolygon
     );
-
     co.Execute(solution, delta);
-
     if (solution.length === 0) break;
-
     const floatSolution: Point2D[][] = solution.map((path: Path) =>
       path.map((pt: IntPoint) => ({ x: pt.X / CLIPPER_SCALE, y: pt.Y / CLIPPER_SCALE }))
     );
-
     perimeterLayers.push(floatSolution);
     currentPolygons = solution;
   }
-
   return perimeterLayers;
 }
-
 /**
  * Clips pre-generated infill lines against inner boundary polygons using ClipperLib intersection.
  */
@@ -70,31 +56,26 @@ export function generateInfillClipper(
 ): Point2D[][] {
   const c = new ClipperLib.Clipper();
   const solution = new (ClipperLib as any).PolyTree();
-
   const clipperBoundaries = innerBoundaryPolys.map((poly) =>
     poly.map((pt) => ({
       X: Math.round(pt.x * CLIPPER_SCALE),
       Y: Math.round(pt.y * CLIPPER_SCALE),
     }))
   );
-
   const clipperLines = infillLines.map((line) =>
     line.map((pt) => ({
       X: Math.round(pt.x * CLIPPER_SCALE),
       Y: Math.round(pt.y * CLIPPER_SCALE),
     }))
   );
-
   c.AddPaths(clipperBoundaries, ClipperLib.PolyType.ptSubject, true);
   c.AddPaths(clipperLines, ClipperLib.PolyType.ptClip, false);
-
   c.Execute(
     ClipperLib.ClipType.ctIntersection,
     solution,
     ClipperLib.PolyFillType.pftNonZero,
     ClipperLib.PolyFillType.pftNonZero
   );
-
   const outputLines: Point2D[][] = [];
   const collectPaths = (node: any) => {
     if (node.Contour && node.Contour().length > 0) {
@@ -110,11 +91,9 @@ export function generateInfillClipper(
       collectPaths(children[i]);
     }
   };
-
   collectPaths(solution);
   return outputLines;
 }
-
 export const PRESETS = [
   { value: "balanced", label: "Balanced", targetRatio: 0.50, walls: 3, infill: 15, patternIdx: 0 },
   { value: "appearance", label: "Best Appearance", targetRatio: 0.30, walls: 2, infill: 10, patternIdx: 1 },
@@ -123,13 +102,11 @@ export const PRESETS = [
   { value: "lowest_cost", label: "Lowest Cost", targetRatio: 0.65, walls: 2, infill: 5, patternIdx: 0 },
   { value: "lightest", label: "Lightest Part", targetRatio: 0.50, walls: 2, infill: 5, patternIdx: 3 },
 ];
-
 function getClosestIndex(arr: number[], target: number): number {
   return arr.reduce((bestIdx, curr, idx) =>
     Math.abs(curr - target) < Math.abs(arr[bestIdx] - target) ? idx : bestIdx
   , 0);
 }
-
 export const PRINTER_OPTIONS = [
   { label: "Bambu X1-Carbon", value: "x1c", iconUrl: "/printers/x1c.png", bedSize: { x: 256, y: 256, z: 256 }, defaults: { nozzle: 1, layerHeight: 3, wallLoops: 1, infill: 2 } },
   { label: "Bambu P1S", value: "p1s", iconUrl: "/printers/p1s.png", bedSize: { x: 256, y: 256, z: 256 }, defaults: { nozzle: 1, layerHeight: 3, wallLoops: 1, infill: 2 } },
@@ -139,21 +116,18 @@ export const PRINTER_OPTIONS = [
   { label: "Bambu H2C", value: "h2c", iconUrl: "/printers/h2c.png", bedSize: { x: 330, y: 320, z: 325 }, defaults: { nozzle: 1, layerHeight: 2, wallLoops: 1, infill: 2 } },
   { label: "Bambu H2D", value: "h2d", iconUrl: "/printers/h2d.png", bedSize: { x: 350, y: 320, z: 325 }, defaults: { nozzle: 1, layerHeight: 2, wallLoops: 1, infill: 2 } },
 ];
-
 export const MATERIAL_OPTIONS = [
   { label: "PLA", value: "PLA", iconUrl: "/materials/pla.png" },
   { label: "PETG", value: "PETG", iconUrl: "/materials/petg.png" },
   { label: "ABS", value: "ABS", iconUrl: "/materials/abs.png" },
   { label: "TPU", value: "TPU", iconUrl: "/materials/tpu.png" },
 ];
-
 const NOZZLE_OPTIONS = [
   { label: "0.2 mm", value: 0.2 },
   { label: "0.4 mm", value: 0.4 },
   { label: "0.6 mm", value: 0.6 },
   { label: "0.8 mm", value: 0.8 },
 ];
-
 const LAYER_OPTIONS_BY_NOZZLE: Record<number, { label: string; value: number }[]> = {
   0.2: [
     { label: "0.08 mm", value: 0.08 },
@@ -178,7 +152,6 @@ const LAYER_OPTIONS_BY_NOZZLE: Record<number, { label: string; value: number }[]
     { label: "0.40 mm", value: 0.40 },
   ],
 };
-
 const WALL_OPTIONS = [
   { label: "1 Loop", value: 1 },
   { label: "2 Loops", value: 2 },
@@ -186,7 +159,6 @@ const WALL_OPTIONS = [
   { label: "4 Loops", value: 4 },
   { label: "6 Loops", value: 6 },
 ];
-
 const INFILL_OPTIONS = [
   { label: "5%", value: 5 },
   { label: "10%", value: 10 },
@@ -195,7 +167,6 @@ const INFILL_OPTIONS = [
   { label: "50%", value: 50 },
   { label: "100%", value: 100 },
 ];
-
 const INFILL_PATTERN_OPTIONS = [
   { label: "Grid", value: "grid", iconUrl: "/infill/grid.png" },
   { label: "Gyroid", value: "gyroid", iconUrl: "/infill/gyroid.png" },
@@ -204,7 +175,6 @@ const INFILL_PATTERN_OPTIONS = [
   { label: "Cubic", value: "cubic", iconUrl: "/infill/cubic.png" },
   { label: "Concentric", value: "concentric", iconUrl: "/infill/concentric.png" },
 ];
-
 const FILAMENT_LISTINGS = [
   { id: 1, name: "Bambu Lab PLA Basic (1kg)", material: "PLA", price: 19.99, store: "Bambu Store Online", distance: "Online" },
   { id: 2, name: "Micro Center Inland PLA+ (1kg)", material: "PLA", price: 18.99, store: "Micro Center (Santa Clara)", distance: "4.2 miles" },
@@ -214,26 +184,22 @@ const FILAMENT_LISTINGS = [
   { id: 6, name: "Polymaker PolyMax ABS (1kg)", material: "ABS", price: 29.99, store: "3D Printing USA", distance: "Online" },
   { id: 7, name: "NinjaTek NinjaFlex TPU (0.5kg)", material: "TPU", price: 32.00, store: "MatterHackers", distance: "Online" },
 ];
-
 const HEATMAP_MODES = [
   { key: "none", label: "None" },
   { key: "overhang", label: "Overhang" },
   { key: "stress", label: "Stress" },
   { key: "thinWall", label: "Thin Walls" },
 ] as const;
-
 interface HeatmapMetrics {
   overhangRatio?: number;   
   stressScore?: number;     
   thinWallRatio?: number;   
 }
-
 interface PrinterBed {
   x: number;
   y: number;
   z: number;
 }
-
 function scoreFromRatio(ratio: number, toleranceRatio: number, penaltyMultiplier: number = 2.0): number {
   const clamped = Math.max(0, Math.min(1, ratio));
   if (clamped <= toleranceRatio) return 100;
@@ -241,7 +207,6 @@ function scoreFromRatio(ratio: number, toleranceRatio: number, penaltyMultiplier
   const penalty = Math.min(100, excess * 100 * penaltyMultiplier);
   return Math.max(0, Math.round(100 - penalty));
 }
-
 function calculatePrintabilityScore(
   analysis: any,
   holeAnalysis: { hasHoles: boolean; openEdgeCount: number } | null,
@@ -253,31 +218,25 @@ function calculatePrintabilityScore(
     stressScore: rawStressMetric = 0,
     thinWallRatio = 0,
   }: HeatmapMetrics = analysis.heatmapMetrics || {};
-
   const normalizedStress = rawStressMetric / 100;
   const overhangScore = scoreFromRatio(overhangRatio, 0.01, 3.0);
   const wallScore = scoreFromRatio(thinWallRatio, 0.02, 0.6);
   const stressScore = scoreFromRatio(Math.max(0, Math.min(1, normalizedStress)), 0.25, 1.2);
-
   let score = Math.round(
     overhangScore * 0.45 +
     wallScore * 0.40 +
     stressScore * 0.15
   );
-
   const fitsX = analysis.x <= printerBed.x;
   const fitsY = analysis.y <= printerBed.y;
   const fitsZ = analysis.z <= printerBed.z;
   const fitsAll = fitsX && fitsY && fitsZ;
   const hasOpenHoles = holeAnalysis?.hasHoles && holeAnalysis.openEdgeCount > 0;
-
   if (!fitsAll || hasOpenHoles) {
     score = 0; 
   }
-
   let color = "#10b981"; 
   let statusText = "Ready to Print";
-
   if (!fitsAll) {
     color = "#f43f5e"; 
     statusText = "Exceeds Build Volume";
@@ -294,7 +253,6 @@ function calculatePrintabilityScore(
     color = "#f59e0b";
     statusText = "Minor Tweaks Recommended";
   }
-
   return {
     score,
     color,
@@ -308,12 +266,10 @@ function calculatePrintabilityScore(
     },
   };
 }
-
 export function ScorePill({ printability }: { printability: ReturnType<typeof calculatePrintabilityScore> }) {
   const [isHovered, setIsHovered] = useState(false);
   if (!printability) return null;
   const { score, color, statusText, details } = printability;
-
   const getIssues = () => {
     const issues = [];
     if (details.meshScore < 100) {
@@ -330,9 +286,7 @@ export function ScorePill({ printability }: { printability: ReturnType<typeof ca
     }
     return issues;
   };
-
   const issues = getIssues();
-
   return (
     <div
       style={{
@@ -395,7 +349,6 @@ export function ScorePill({ printability }: { printability: ReturnType<typeof ca
           </span>
         </div>
       </div>
-
       <div
         style={{
           position: "absolute",
@@ -459,19 +412,16 @@ export function ScorePill({ printability }: { printability: ReturnType<typeof ca
     </div>
   );
 }
-
 export function CameraResetController({ resetTrigger }: { resetTrigger: number }) {
   const { camera, controls } = useThree();
   const lastTrigger = useRef(resetTrigger);
   const isAnimating = useRef(false);
   const targetCamPos = useMemo(() => new THREE.Vector3(200, -200, 200), []);
   const targetLookAt = useMemo(() => new THREE.Vector3(0, 0, 0), []);
-
   if (resetTrigger !== lastTrigger.current) {
     lastTrigger.current = resetTrigger;
     isAnimating.current = true;
   }
-
   useFrame((_, delta) => {
     if (!isAnimating.current) return;
     const step = Math.min(1, 10 * delta);
@@ -494,7 +444,6 @@ export function CameraResetController({ resetTrigger }: { resetTrigger: number }
   });
   return null;
 }
-
 function CanvasUpdater({ isDarkMode }: { isDarkMode: boolean }) {
   const { gl } = useThree();
   useEffect(() => {
@@ -502,7 +451,6 @@ function CanvasUpdater({ isDarkMode }: { isDarkMode: boolean }) {
   }, [gl, isDarkMode]);
   return null;
 }
-
 interface BottomWheelPanelProps {
   printerIdx: number;
   materialIdx: number;
@@ -520,7 +468,6 @@ interface BottomWheelPanelProps {
   onInfillChange: (idx: number) => void;
   onInfillPatternChange: (idx: number) => void;
 }
-
 export function BottomWheelPanel({
   printerIdx,
   materialIdx,
@@ -557,21 +504,18 @@ export function BottomWheelPanel({
           margin: 0;
           transition: transform 0.2s ease, gap 0.2s ease;
         }
-
         @media (max-width: 1440px) {
           .bottom-wheel-container {
             transform: translateX(-50%) scale(0.88);
             transform-origin: bottom center;
           }
         }
-
         @media (max-width: 1280px) {
           .bottom-wheel-container {
             transform: translateX(-50%) scale(0.78);
             transform-origin: bottom center;
           }
         }
-
         @media (max-width: 1024px) {
           .bottom-wheel-container {
             transform: translateX(-50%) scale(0.68);
@@ -579,7 +523,6 @@ export function BottomWheelPanel({
           }
         }
       `}</style>
-
       <div className="bottom-wheel-container">
         <RadialWheel title="Printer" options={PRINTER_OPTIONS} selectedIndex={printerIdx} onChange={onPrinterChange} iconSize={64} autoHide={true} />
         <RadialWheel title="Material" options={MATERIAL_OPTIONS} selectedIndex={materialIdx} onChange={onMaterialChange} iconSize={64} autoHide={true} />
@@ -592,12 +535,10 @@ export function BottomWheelPanel({
     </>
   );
 }
-
 interface RightPresetWheelProps {
   presetIdx: number;
   onPresetChange: (idx: number) => void;
 }
-
 export function RightPresetWheel({ presetIdx, onPresetChange }: RightPresetWheelProps) {
   const presetOptions = useMemo(() => PRESETS.map((p, idx) => ({ ...p, value: idx })), []);
   return (
@@ -624,7 +565,6 @@ export function RightPresetWheel({ presetIdx, onPresetChange }: RightPresetWheel
     </div>
   );
 }
-
 export default function App() {
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
   const [currentModel, setCurrentModel] = useState<any>(null);
@@ -643,7 +583,6 @@ export default function App() {
   const [presetIdx, setPresetIdx] = useState<number>(0);
   const [showPriceFinder, setShowPriceFinder] = useState<boolean>(false);
   const [selectedFilterMaterial, setSelectedFilterMaterial] = useState<string>("ALL");
-
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nozzleDiameterMm = NOZZLE_OPTIONS[nozzleIdx].value;
   const currentLayerOptions = LAYER_OPTIONS_BY_NOZZLE[nozzleDiameterMm] || LAYER_OPTIONS_BY_NOZZLE[0.4];
@@ -660,12 +599,10 @@ export default function App() {
   const [showHoles, setShowHoles] = useState<boolean>(false);
   const [showBedBounds, setShowBedBounds] = useState<boolean>(true);
   const [holeAnalysis, setHoleAnalysis] = useState<{ hasHoles: boolean; openEdgeCount: number } | null>(null);
-
   const currentPrinterBed = PRINTER_OPTIONS[printerIdx].bedSize;
   const printability = useMemo(() => {
     return calculatePrintabilityScore(analysis, holeAnalysis, currentPrinterBed);
   }, [analysis, holeAnalysis, currentPrinterBed, nozzleDiameterMm]);
-
   const applyPreset = (idx: number) => {
     setPresetIdx(idx);
     const selectedPreset = PRESETS[idx];
@@ -682,7 +619,6 @@ export default function App() {
       setInfillPatternIdx(selectedPreset.patternIdx);
     }
   };
-
   const handlePrinterChange = (idx: number) => {
     setPrinterIdx(idx);
     const selectedPrinter = PRINTER_OPTIONS[idx];
@@ -695,7 +631,6 @@ export default function App() {
       setInfillIdx(selectedPrinter.defaults.infill);
     }
   };
-
   const handleMaterialChange = (idx: number) => {
     setMaterialIdx(idx);
     const selectedMat = MATERIAL_OPTIONS[idx];
@@ -703,7 +638,6 @@ export default function App() {
       setFilamentKey(selectedMat.value);
     }
   };
-
   const handleNozzleChange = (newNozzleIdx: number) => {
     setNozzleIdx(newNozzleIdx);
     const newNozzleVal = NOZZLE_OPTIONS[newNozzleIdx].value;
@@ -717,7 +651,6 @@ export default function App() {
       setWallIdx(matchingWallIdx);
     }
   };
-
   const handleFileUpload = (e: any) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -728,7 +661,6 @@ export default function App() {
       setCurrentModel({ objectUrl, format: ext, fileName: file.name });
     }
   };
-
   const handleExportSettings = () => {
     const dims = analysis
       ? `${analysis.x.toFixed(2)} x ${analysis.y.toFixed(2)} x ${analysis.z.toFixed(2)} mm`
@@ -742,20 +674,17 @@ export default function App() {
       : "N/A";
     const score = printability?.score != null ? `${printability.score}/100` : "N/A";
     const status = printability?.statusText ?? "N/A";
-
     const textContent = `
 ==================================================
               PRINTWISE CONFIG REPORT
 ==================================================
 Generated At: ${new Date().toLocaleString()}
-
 --------------------------------------------------
 1. HARDWARE & MATERIAL SETUP
 --------------------------------------------------
 • Printer:         ${PRINTER_OPTIONS[printerIdx]?.label ?? "Default Printer"}
 • Material:        ${filamentKey}
 • Spool Cost:      $${spoolPrice} USD
-
 --------------------------------------------------
 2. PRINT PARAMETERS
 --------------------------------------------------
@@ -766,7 +695,6 @@ Generated At: ${new Date().toLocaleString()}
 • Infill Pattern:  ${INFILL_PATTERN_OPTIONS[infillPatternIdx]?.label ?? "Grid"}
 • Top Layers:      ${topLayerCount}
 • Bottom Layers:   ${bottomLayerCount}
-
 --------------------------------------------------
 3. MODEL & COST ANALYSIS
 --------------------------------------------------
@@ -776,10 +704,8 @@ Generated At: ${new Date().toLocaleString()}
 • Estimated Cost:   ${cost}
 • Print Score:      ${score}
 • Printability:     ${status}
-
 ==================================================
 `.trim();
-
     const blob = new Blob([textContent], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -788,13 +714,11 @@ Generated At: ${new Date().toLocaleString()}
     a.click();
     URL.revokeObjectURL(url);
   };
-
   useEffect(() => {
     return () => {
       if (currentModel?.objectUrl) URL.revokeObjectURL(currentModel.objectUrl);
     };
   }, [currentModel]);
-
   const customAxesHelper = useMemo(() => {
     const group = new THREE.Group();
     const xGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-150, 0, 0), new THREE.Vector3(150, 0, 0)]);
@@ -816,7 +740,6 @@ Generated At: ${new Date().toLocaleString()}
     group.add(lineX, lineY, lineZ);
     return group;
   }, []);
-
   const bedBoundsMesh = useMemo(() => {
     const { x, y, z } = currentPrinterBed;
     const geometry = new THREE.BoxGeometry(x, y, z);
@@ -832,15 +755,12 @@ Generated At: ${new Date().toLocaleString()}
     lines.renderOrder = -1;
     return lines;
   }, [currentPrinterBed.x, currentPrinterBed.y, currentPrinterBed.z, isDarkMode]);
-
   const maxGridSize = Math.max(currentPrinterBed.x, currentPrinterBed.y);
   const gridDivisions = Math.round(maxGridSize / 10);
-
   const formatDim = (val: number) => (useInches ? (val / 25.4).toFixed(2) + " in" : val.toFixed(1) + " mm");
   const formatVolume = (val: number) => (useInches ? (val / 16387).toFixed(2) + " in³" : (val / 1000).toFixed(1) + " cm³");
   const formatWeight = (est: any) => (est ? `${est.weightGrams.toFixed(1)} g` : "0 g");
   const formatCost = (est: any) => (est ? `$${est.cost.toFixed(2)}` : "$0.00");
-
   const calculatePrintTime = () => {
     if (!analysis || !analysis.volume) return "0h 0m";
     const volumeCm3 = analysis.volume / 1000;
@@ -849,9 +769,7 @@ Generated At: ${new Date().toLocaleString()}
     const totalSeconds = (totalExtrudedCm3 * 1000) / 8;
     return `${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`;
   };
-
   const gridColor = isDarkMode ? "#334155" : "#e2e2e0";
-
   return (
     <div className={`app-root ${isDarkMode ? "dark-theme" : "light-theme"}`} style={{ width: "100vw", height: "100vh", position: "relative" }}>
       <style>{`
@@ -867,12 +785,10 @@ Generated At: ${new Date().toLocaleString()}
           --text-secondary: #475569;
           --text-tertiary: #94a3b8;
           --accent-blue: #2563eb;
-
           --wheel-sector-bg: #e2e8f0;
           --wheel-center-bg: #ffffff;
           --wheel-border: #fbfbfa;
         }
-
         .dark-theme {
           --bg-canvas: #0f172a;
           --bg-glass: rgba(30, 41, 59, 0.85);
@@ -885,12 +801,10 @@ Generated At: ${new Date().toLocaleString()}
           --text-secondary: #cbd5e1;
           --text-tertiary: #64748b;
           --accent-blue: #3b82f6;
-
           --wheel-sector-bg: #334155;
           --wheel-center-bg: #1e293b;
           --wheel-border: #0f172a;
         }
-
         .apple-card {
           background: var(--bg-card);
           border: 1px solid var(--card-border);
@@ -901,7 +815,6 @@ Generated At: ${new Date().toLocaleString()}
           width: 260px;
           color: var(--text-primary);
         }
-
         .card-title {
           font-size: 13px;
           font-weight: 700;
@@ -911,7 +824,6 @@ Generated At: ${new Date().toLocaleString()}
           align-items: center;
           justify-content: space-between;
         }
-
         .metric-row {
           display: flex;
           justify-content: space-between;
@@ -919,30 +831,25 @@ Generated At: ${new Date().toLocaleString()}
           font-size: 12px;
           margin-bottom: 8px;
         }
-
         .metric-label {
           color: var(--text-secondary);
           font-weight: 500;
         }
-
         .metric-value {
           color: var(--text-primary);
           font-weight: 700;
         }
-
         .slider-group {
           display: flex;
           flex-direction: column;
           gap: 6px;
           margin-top: 8px;
         }
-
         .apple-slider {
           accent-color: var(--accent-blue);
           cursor: pointer;
           width: 100%;
         }
-
         ::-webkit-scrollbar {
           width: 6px;
           height: 6px;
@@ -955,7 +862,6 @@ Generated At: ${new Date().toLocaleString()}
           border-radius: 999px;
         }
       `}</style>
-
       <Canvas
         shadows
         gl={{ logarithmicDepthBuffer: true }}
@@ -1005,9 +911,7 @@ Generated At: ${new Date().toLocaleString()}
         <OrbitControls makeDefault minDistance={1} maxDistance={1000} />
         <CameraResetController resetTrigger={resetCounter} />
       </Canvas>
-
       <ScorePill printability={printability} />
-
       <BottomWheelPanel
         printerIdx={printerIdx}
         materialIdx={materialIdx}
@@ -1025,9 +929,7 @@ Generated At: ${new Date().toLocaleString()}
         onInfillChange={setInfillIdx}
         onInfillPatternChange={setInfillPatternIdx}
       />
-
       <RightPresetWheel presetIdx={presetIdx} onPresetChange={applyPreset} />
-      
       <div style={{ position: "absolute", top: 20, left: 20, zIndex: 10 }}>
         <input type="file" ref={fileInputRef} accept=".stl" onChange={handleFileUpload} style={{ display: "none" }} />
         <button
@@ -1060,7 +962,6 @@ Generated At: ${new Date().toLocaleString()}
           </div>
         )}
       </div>
-
       <div style={{ position: "absolute", top: 20, right: 20, zIndex: 10, display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {holeAnalysis && (
@@ -1068,7 +969,6 @@ Generated At: ${new Date().toLocaleString()}
               {holeAnalysis.hasHoles ? `⚠ ${holeAnalysis.openEdgeCount} open edge(s)` : "✓ Watertight"}
             </div>
           )}
-
           <button
             onClick={() => setIsDarkMode(!isDarkMode)}
             onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
@@ -1093,7 +993,6 @@ Generated At: ${new Date().toLocaleString()}
           >
             {isDarkMode ? "☀️" : "🌙"}
           </button>
-
           <div style={{ position: "relative" }}>
             <button
               onClick={() => setShowPriceFinder(!showPriceFinder)}
@@ -1153,7 +1052,6 @@ Generated At: ${new Date().toLocaleString()}
                     ✕
                   </button>
                 </div>
-
                 <div style={{ display: "flex", gap: "4px", overflowX: "auto", paddingBottom: "2px" }}>
                   {["ALL", "PLA", "PETG", "ABS", "TPU"].map((mat) => (
                     <button
@@ -1174,7 +1072,6 @@ Generated At: ${new Date().toLocaleString()}
                     </button>
                   ))}
                 </div>
-
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "280px", overflowY: "auto" }}>
                   {FILAMENT_LISTINGS
                     .filter(item => selectedFilterMaterial === "ALL" || item.material === selectedFilterMaterial)
@@ -1223,7 +1120,6 @@ Generated At: ${new Date().toLocaleString()}
             )}
           </div>
         </div>
-
         <div style={{ display: "flex", gap: 8 }}>
           {HEATMAP_MODES.map(({ key, label }) => {
             const isActive = activeHeatmap === key;
@@ -1269,7 +1165,6 @@ Generated At: ${new Date().toLocaleString()}
             );
           })}
         </div>
-
         <div style={{ display: "flex", gap: 8 }}>
           <button
             onClick={() => setShowBedBounds(!showBedBounds)}
@@ -1316,7 +1211,6 @@ Generated At: ${new Date().toLocaleString()}
             {showHoles ? "Hide Hole Check" : "Check for Holes"}
           </button>
         </div>
-
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
           <button
             onClick={() => setResetCounter((c) => c + 1)}
@@ -1395,7 +1289,6 @@ Generated At: ${new Date().toLocaleString()}
           </button>
         </div>
       </div>
-
       <div className="sidebar-container" style={{ position: "absolute", top: 88, left: 20, zIndex: 10, display: "flex", flexDirection: "column", gap: 12 }}>
         <div className="apple-card">
           <div className="card-title">
