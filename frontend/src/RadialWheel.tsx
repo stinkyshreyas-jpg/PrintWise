@@ -164,7 +164,6 @@ export default function RadialWheel({
     onChange(i);
   };
 
-  // Center text coordinates depending on orientation
   let centerTextY = radius;
   let centerTextX = radius;
   if (isRight) {
@@ -228,7 +227,7 @@ export default function RadialWheel({
           ? "top center"
           : "bottom center",
         transition: "transform 0.35s cubic-bezier(0.16, 1, 0.3, 1)",
-        zIndex: isVisible ? 2 : 1, // Kept below 10 so it hides behind the Analysis panel above
+        zIndex: isVisible ? 2 : 1,
         padding: "8px",
       }}
     >
@@ -263,8 +262,8 @@ export default function RadialWheel({
           touchAction: "none",
           cursor: "pointer",
           filter: isVisible
-            ? "drop-shadow(0 12px 24px rgba(0,0,0,0.12))"
-            : "drop-shadow(0 4px 12px rgba(0,0,0,0.06))",
+            ? "drop-shadow(0 12px 24px rgba(0,0,0,0.3))"
+            : "drop-shadow(0 4px 12px rgba(0,0,0,0.15))",
           transition: "filter 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
         }}
       >
@@ -312,10 +311,10 @@ export default function RadialWheel({
                 <g key={i} onClick={() => handleSectorClick(i)} style={{ cursor: "pointer" }}>
                   <path
                     d={describeArc(radius, radius, innerRadius, radius, startAngle, endAngle)}
-                    fill={isSelected ? "var(--accent-blue)" : "rgba(255, 255, 255, 0.85)"}
-                    stroke="var(--card-bg)"
+                    fill={isSelected ? "var(--accent-blue)" : "var(--wheel-sector-bg)"}
+                    stroke="var(--wheel-border)"
                     strokeWidth="1.5"
-                    style={{ transition: "fill 0.2s ease" }}
+                    style={{ transition: "fill 0.2s ease, stroke 0.2s ease" }}
                   />
 
                   {opt.iconUrl ? (
@@ -348,7 +347,14 @@ export default function RadialWheel({
             })}
           </g>
 
-          <circle cx={radius} cy={radius} r={innerRadius - 1} fill="var(--card-bg)" />
+          <circle
+            cx={radius}
+            cy={radius}
+            r={innerRadius - 1}
+            fill="var(--wheel-center-bg)"
+            stroke="var(--wheel-border)"
+            strokeWidth="1"
+          />
 
           {showCenterText && (
             <text

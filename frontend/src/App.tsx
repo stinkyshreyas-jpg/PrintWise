@@ -2,8 +2,118 @@ import React, { Suspense, useState, useRef, useMemo, useEffect } from "react";
 import * as THREE from "three";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
+import ClipperLib from "clipper-lib";
 import Model from "./Model";
 import RadialWheel from "./RadialWheel";
+
+const CLIPPER_SCALE = 1000;
+
+export interface Point2D {
+  x: number;
+  y: number;
+}
+
+// Define explicit interfaces if ambient types are missing
+export interface IntPoint {
+  X: number;
+  Y: number;
+}
+export type Path = IntPoint[];
+export type Paths = Path[];
+
+export function generatePerimetersClipper(
+  rawContours: Point2D[][],
+  wallCount: number,
+  nozzleWidthMm: number
+): Point2D[][][] {
+  let currentPolygons: Paths = rawContours.map((poly) =>
+    poly.map((pt) => ({
+      X: Math.round(pt.x * CLIPPER_SCALE),
+      Y: Math.round(pt.y * CLIPPER_SCALE),
+    }))
+  );
+  
+  const perimeterLayers: Point2D[][][] = [];
+  const delta = -Math.round((nozzleWidthMm / 2) * CLIPPER_SCALE);
+
+  for (let i = 0; i < wallCount; i++) {
+    const co = new ClipperLib.ClipperOffset();
+    const solution: Paths = [];
+
+    co.AddPaths(
+      currentPolygons,
+      ClipperLib.JoinType.jtMiter,
+      ClipperLib.EndType.etClosedPolygon
+    );
+
+    co.Execute(solution, delta);
+
+    if (solution.length === 0) break;
+
+    const floatSolution: Point2D[][] = solution.map((path: Path) =>
+      path.map((pt: IntPoint) => ({ x: pt.X / CLIPPER_SCALE, y: pt.Y / CLIPPER_SCALE }))
+    );
+
+    perimeterLayers.push(floatSolution);
+    currentPolygons = solution;
+  }
+
+  return perimeterLayers;
+}
+
+/**
+ * Clips pre-generated infill lines against inner boundary polygons using ClipperLib intersection.
+ */
+export function generateInfillClipper(
+  innerBoundaryPolys: Point2D[][],
+  infillLines: Point2D[][]
+): Point2D[][] {
+  const c = new ClipperLib.Clipper();
+  const solution = new (ClipperLib as any).PolyTree();
+
+  const clipperBoundaries = innerBoundaryPolys.map((poly) =>
+    poly.map((pt) => ({
+      X: Math.round(pt.x * CLIPPER_SCALE),
+      Y: Math.round(pt.y * CLIPPER_SCALE),
+    }))
+  );
+
+  const clipperLines = infillLines.map((line) =>
+    line.map((pt) => ({
+      X: Math.round(pt.x * CLIPPER_SCALE),
+      Y: Math.round(pt.y * CLIPPER_SCALE),
+    }))
+  );
+
+  c.AddPaths(clipperBoundaries, ClipperLib.PolyType.ptSubject, true);
+  c.AddPaths(clipperLines, ClipperLib.PolyType.ptClip, false);
+
+  c.Execute(
+    ClipperLib.ClipType.ctIntersection,
+    solution,
+    ClipperLib.PolyFillType.pftNonZero,
+    ClipperLib.PolyFillType.pftNonZero
+  );
+
+  const outputLines: Point2D[][] = [];
+  const collectPaths = (node: any) => {
+    if (node.Contour && node.Contour().length > 0) {
+      outputLines.push(
+        node.Contour().map((pt: { X: number; Y: number }) => ({
+          x: pt.X / CLIPPER_SCALE,
+          y: pt.Y / CLIPPER_SCALE,
+        }))
+      );
+    }
+    const children = node.Childs();
+    for (let i = 0; i < children.length; i++) {
+      collectPaths(children[i]);
+    }
+  };
+
+  collectPaths(solution);
+  return outputLines;
+}
 
 export const PRESETS = [
   { value: "balanced", label: "Balanced", targetRatio: 0.50, walls: 3, infill: 15, patternIdx: 0 },
@@ -246,12 +356,12 @@ export function ScorePill({ printability }: { printability: ReturnType<typeof ca
           gap: "10px",
           padding: "8px 16px",
           borderRadius: "980px",
-          background: "rgba(255, 255, 255, 0.95)",
+          background: "var(--bg-glass)",
           backdropFilter: "blur(16px)",
           boxShadow: isHovered
-            ? "0 15px 30px -5px rgba(0, 0, 0, 0.15), 0 10px 15px -6px rgba(0, 0, 0, 0.1)"
-            : "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05)",
-          border: "1px solid var(--card-border, #e2e8f0)",
+            ? "0 15px 30px -5px rgba(0, 0, 0, 0.3), 0 10px 15px -6px rgba(0, 0, 0, 0.2)"
+            : "0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
+          border: "1px solid var(--card-border)",
           cursor: "help",
           transition: "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease",
           transform: isHovered ? "scale(1.03)" : "scale(1)",
@@ -277,7 +387,7 @@ export function ScorePill({ printability }: { printability: ReturnType<typeof ca
           {score}
         </div>
         <div style={{ display: "flex", flexDirection: "column", textAlign: "left", paddingRight: "8px" }}>
-          <span style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-tertiary, #94a3b8)", textTransform: "uppercase", letterSpacing: "0.05em", lineHeight: 1.2 }}>
+          <span style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.05em", lineHeight: 1.2 }}>
             Print Score
           </span>
           <span style={{ fontSize: "13px", fontWeight: 700, color: color, lineHeight: 1.2 }}>
@@ -292,10 +402,10 @@ export function ScorePill({ printability }: { printability: ReturnType<typeof ca
           top: "100%",
           marginTop: "12px",
           width: "280px",
-          background: "#fff",
+          background: "var(--bg-card)",
           borderRadius: "16px",
-          boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
-          border: "1px solid var(--card-border, #e2e8f0)",
+          boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 10px 10px -5px rgba(0, 0, 0, 0.2)",
+          border: "1px solid var(--card-border)",
           opacity: isHovered ? 1 : 0,
           visibility: isHovered ? "visible" : "hidden",
           transform: isHovered ? "translateY(0)" : "translateY(-10px)",
@@ -305,29 +415,29 @@ export function ScorePill({ printability }: { printability: ReturnType<typeof ca
           pointerEvents: "none",
         }}
       >
-        <h4 style={{ fontSize: "11px", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "16px", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px", margin: "0 0 16px 0" }}>
+        <h4 style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "16px", borderBottom: "1px solid var(--card-border)", paddingBottom: "8px", margin: "0 0 16px 0" }}>
           Heatmap Breakdown
         </h4>
         <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "20px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px" }}>
-            <span style={{ fontWeight: 600, color: "#475569" }}>Overhang Analysis</span>
+            <span style={{ fontWeight: 600, color: "var(--text-secondary)" }}>Overhang Analysis</span>
             <span style={{ fontWeight: 700, color: details.overhangScore < 85 ? '#f59e0b' : '#10b981' }}>{details.overhangScore} / 100</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px" }}>
-            <span style={{ fontWeight: 600, color: "#475569" }}>Wall Thickness</span>
+            <span style={{ fontWeight: 600, color: "var(--text-secondary)" }}>Wall Thickness</span>
             <span style={{ fontWeight: 700, color: details.wallScore < 85 ? '#f59e0b' : '#10b981' }}>{details.wallScore} / 100</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px" }}>
-            <span style={{ fontWeight: 600, color: "#475569" }}>Fit & Stress</span>
+            <span style={{ fontWeight: 600, color: "var(--text-secondary)" }}>Fit & Stress</span>
             <span style={{ fontWeight: 700, color: details.fitScore < 100 ? '#ca8a04' : '#10b981' }}>{details.fitScore} / 100</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "13px" }}>
-            <span style={{ fontWeight: 600, color: "#475569" }}>Mesh Integrity</span>
+            <span style={{ fontWeight: 600, color: "var(--text-secondary)" }}>Mesh Integrity</span>
             <span style={{ fontWeight: 700, color: details.meshScore < 100 ? '#ef4444' : '#10b981' }}>{details.meshScore} / 100</span>
           </div>
         </div>
-        <div style={{ borderTop: "1px solid #f1f5f9", background: "#f8fafc", margin: "0 -20px -20px -20px", padding: "20px", borderRadius: "0 0 16px 16px" }}>
-          <h4 style={{ fontSize: "11px", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "12px", margin: "0 0 12px 0" }}>
+        <div style={{ borderTop: "1px solid var(--card-border)", background: "var(--bg-secondary)", margin: "0 -20px -20px -20px", padding: "20px", borderRadius: "0 0 16px 16px" }}>
+          <h4 style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "12px", margin: "0 0 12px 0" }}>
             Detected Issues
           </h4>
           {issues.length > 0 ? (
@@ -335,12 +445,12 @@ export function ScorePill({ printability }: { printability: ReturnType<typeof ca
               {issues.map((issue, idx) => (
                 <p key={idx} style={{ fontSize: "12px", lineHeight: "1.4", margin: 0, color: issue.color }}>
                   <strong style={{ display: "block", marginBottom: "2px", fontWeight: 700 }}>{issue.label}</strong>
-                  <span style={{ color: "#475569" }}>{issue.text}</span>
+                  <span style={{ color: "var(--text-secondary)" }}>{issue.text}</span>
                 </p>
               ))}
             </div>
           ) : (
-            <p style={{ fontSize: "12px", color: "#059669", lineHeight: "1.4", margin: 0, fontWeight: 500 }}>
+            <p style={{ fontSize: "12px", color: "#10b981", lineHeight: "1.4", margin: 0, fontWeight: 500 }}>
               Model geometry is solid. Ready for slicing.
             </p>
           )}
@@ -382,6 +492,14 @@ export function CameraResetController({ resetTrigger }: { resetTrigger: number }
       isAnimating.current = false;
     }
   });
+  return null;
+}
+
+function CanvasUpdater({ isDarkMode }: { isDarkMode: boolean }) {
+  const { gl } = useThree();
+  useEffect(() => {
+    gl.setClearColor(isDarkMode ? "#0f172a" : "#fbfbfa");
+  }, [gl, isDarkMode]);
   return null;
 }
 
@@ -440,7 +558,6 @@ export function BottomWheelPanel({
           transition: transform 0.2s ease, gap 0.2s ease;
         }
 
-        /* Responsive scaling for standard 1366px & 1440px laptops */
         @media (max-width: 1440px) {
           .bottom-wheel-container {
             transform: translateX(-50%) scale(0.88);
@@ -448,7 +565,6 @@ export function BottomWheelPanel({
           }
         }
 
-        /* Responsive scaling for 1280px and smaller laptops */
         @media (max-width: 1280px) {
           .bottom-wheel-container {
             transform: translateX(-50%) scale(0.78);
@@ -456,7 +572,6 @@ export function BottomWheelPanel({
           }
         }
 
-        /* Compact fallback for smaller screens */
         @media (max-width: 1024px) {
           .bottom-wheel-container {
             transform: translateX(-50%) scale(0.68);
@@ -511,6 +626,7 @@ export function RightPresetWheel({ presetIdx, onPresetChange }: RightPresetWheel
 }
 
 export default function App() {
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
   const [currentModel, setCurrentModel] = useState<any>(null);
   const [fileName, setFileName] = useState<string>("");
   const [wireframe, setWireframe] = useState<boolean>(false);
@@ -706,7 +822,7 @@ Generated At: ${new Date().toLocaleString()}
     const geometry = new THREE.BoxGeometry(x, y, z);
     geometry.translate(0, 0, z / 2);
     const material = new THREE.LineBasicMaterial({
-      color: 0x94a3b8,
+      color: isDarkMode ? 0x475569 : 0x94a3b8,
       transparent: true,
       opacity: 0.3,
       depthWrite: true,
@@ -715,7 +831,7 @@ Generated At: ${new Date().toLocaleString()}
     const lines = new THREE.LineSegments(new THREE.WireframeGeometry(geometry), material);
     lines.renderOrder = -1;
     return lines;
-  }, [currentPrinterBed.x, currentPrinterBed.y, currentPrinterBed.z]);
+  }, [currentPrinterBed.x, currentPrinterBed.y, currentPrinterBed.z, isDarkMode]);
 
   const maxGridSize = Math.max(currentPrinterBed.x, currentPrinterBed.y);
   const gridDivisions = Math.round(maxGridSize / 10);
@@ -734,25 +850,130 @@ Generated At: ${new Date().toLocaleString()}
     return `${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`;
   };
 
+  const gridColor = isDarkMode ? "#334155" : "#e2e2e0";
+
   return (
-    <div style={{ width: "100vw", height: "100vh", position: "relative" }}>
+    <div className={`app-root ${isDarkMode ? "dark-theme" : "light-theme"}`} style={{ width: "100vw", height: "100vh", position: "relative" }}>
+      <style>{`
+        .light-theme {
+          --bg-canvas: #fbfbfa;
+          --bg-glass: rgba(255, 255, 255, 0.95);
+          --bg-card: #ffffff;
+          --bg-secondary: #f8fafc;
+          --bg-pill: #f1f5f9;
+          --card-border: #e2e8f0;
+          --divider: #e2e8f0;
+          --text-primary: #0f172a;
+          --text-secondary: #475569;
+          --text-tertiary: #94a3b8;
+          --accent-blue: #2563eb;
+
+          --wheel-sector-bg: #e2e8f0;
+          --wheel-center-bg: #ffffff;
+          --wheel-border: #fbfbfa;
+        }
+
+        .dark-theme {
+          --bg-canvas: #0f172a;
+          --bg-glass: rgba(30, 41, 59, 0.85);
+          --bg-card: #1e293b;
+          --bg-secondary: #0f172a;
+          --bg-pill: #334155;
+          --card-border: rgba(255, 255, 255, 0.12);
+          --divider: rgba(255, 255, 255, 0.08);
+          --text-primary: #f8fafc;
+          --text-secondary: #cbd5e1;
+          --text-tertiary: #64748b;
+          --accent-blue: #3b82f6;
+
+          --wheel-sector-bg: #334155;
+          --wheel-center-bg: #1e293b;
+          --wheel-border: #0f172a;
+        }
+
+        .apple-card {
+          background: var(--bg-card);
+          border: 1px solid var(--card-border);
+          border-radius: 16px;
+          padding: 16px;
+          box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2);
+          backdrop-filter: blur(12px);
+          width: 260px;
+          color: var(--text-primary);
+        }
+
+        .card-title {
+          font-size: 13px;
+          font-weight: 700;
+          color: var(--text-primary);
+          margin-bottom: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+
+        .metric-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-size: 12px;
+          margin-bottom: 8px;
+        }
+
+        .metric-label {
+          color: var(--text-secondary);
+          font-weight: 500;
+        }
+
+        .metric-value {
+          color: var(--text-primary);
+          font-weight: 700;
+        }
+
+        .slider-group {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          margin-top: 8px;
+        }
+
+        .apple-slider {
+          accent-color: var(--accent-blue);
+          cursor: pointer;
+          width: 100%;
+        }
+
+        ::-webkit-scrollbar {
+          width: 6px;
+          height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+          background: var(--card-border);
+          border-radius: 999px;
+        }
+      `}</style>
+
       <Canvas
         shadows
         gl={{ logarithmicDepthBuffer: true }}
         style={{ background: "var(--bg-canvas)" }}
         camera={{ position: [200, -200, 200], fov: 45, near: 0.1, far: 2000 }}
         onCreated={({ camera, gl }) => {
-          gl.setClearColor("#fbfbfa");
+          gl.setClearColor(isDarkMode ? "#0f172a" : "#fbfbfa");
           camera.up.set(0, 0, 1);
           camera.lookAt(0, 0, 0);
         }}
       >
-        <ambientLight intensity={0.9} />
-        <directionalLight position={[100, -100, 150]} intensity={1.5} castShadow />
+        <CanvasUpdater isDarkMode={isDarkMode} />
+        <ambientLight intensity={isDarkMode ? 0.6 : 0.9} />
+        <directionalLight position={[100, -100, 150]} intensity={isDarkMode ? 1.8 : 1.5} castShadow />
         <pointLight position={[-50, 50, 50]} intensity={0.4} />
         <gridHelper
-          key={`grid-${maxGridSize}`}
-          args={[maxGridSize, gridDivisions, "#e2e2e0", "#e2e2e0"]}
+          key={`grid-${maxGridSize}-${isDarkMode}`}
+          args={[maxGridSize, gridDivisions, gridColor, gridColor]}
           position={[0, 0, -0.1]}
           rotation={[Math.PI / 2, 0, 0]}
           renderOrder={-1}
@@ -764,7 +985,7 @@ Generated At: ${new Date().toLocaleString()}
             <Model
               model={currentModel}
               wireframe={wireframe}
-              fallbackColor="#cbd5e1"
+              fallbackColor={isDarkMode ? "#475569" : "#cbd5e1"}
               infillPercent={infill}
               spoolPrice={spoolPrice}
               spoolWeightGrams={1000}
@@ -806,6 +1027,7 @@ Generated At: ${new Date().toLocaleString()}
       />
 
       <RightPresetWheel presetIdx={presetIdx} onPresetChange={applyPreset} />
+      
       <div style={{ position: "absolute", top: 20, left: 20, zIndex: 10 }}>
         <input type="file" ref={fileInputRef} accept=".stl" onChange={handleFileUpload} style={{ display: "none" }} />
         <button
@@ -816,9 +1038,9 @@ Generated At: ${new Date().toLocaleString()}
             width: 48,
             height: 48,
             borderRadius: "50%",
-            background: "rgba(255, 255, 255, 0.95)",
+            background: "var(--bg-glass)",
             backdropFilter: "blur(12px)",
-            boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
+            boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.2)",
             border: "1px solid var(--card-border)",
             display: "flex",
             alignItems: "center",
@@ -833,18 +1055,45 @@ Generated At: ${new Date().toLocaleString()}
           </svg>
         </button>
         {fileName && (
-          <div style={{ position: "absolute", top: 0, left: 60, fontSize: "10px", fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap", background: "rgba(255, 255, 255, 0.9)", backdropFilter: "blur(8px)", padding: "6px 10px", borderRadius: 8, boxShadow: "0 4px 6px -1px rgba(0,0,0,0.05)", border: "1px solid var(--card-border)" }}>
+          <div style={{ position: "absolute", top: 0, left: 60, fontSize: "10px", fontWeight: 600, color: "var(--text-primary)", whiteSpace: "nowrap", background: "var(--bg-glass)", backdropFilter: "blur(8px)", padding: "6px 10px", borderRadius: 8, boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)", border: "1px solid var(--card-border)" }}>
             {fileName}
           </div>
         )}
       </div>
+
       <div style={{ position: "absolute", top: 20, right: 20, zIndex: 10, display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {holeAnalysis && (
-            <div style={{ background: holeAnalysis.hasHoles ? "rgba(225, 29, 72, 0.1)" : "rgba(16, 185, 129, 0.1)", color: holeAnalysis.hasHoles ? "#e11d48" : "#059669", padding: "6px 12px", borderRadius: 980, fontSize: "11px", fontWeight: 600, border: "1px solid var(--card-border)" }}>
+            <div style={{ background: holeAnalysis.hasHoles ? "rgba(225, 29, 72, 0.2)" : "rgba(16, 185, 129, 0.2)", color: holeAnalysis.hasHoles ? "#f43f5e" : "#10b981", padding: "6px 12px", borderRadius: 980, fontSize: "11px", fontWeight: 600, border: "1px solid var(--card-border)" }}>
               {holeAnalysis.hasHoles ? `⚠ ${holeAnalysis.openEdgeCount} open edge(s)` : "✓ Watertight"}
             </div>
           )}
+
+          <button
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: "50%",
+              background: "var(--bg-glass)",
+              color: "var(--text-primary)",
+              backdropFilter: "blur(12px)",
+              boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.2)",
+              border: "1px solid var(--card-border)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              fontSize: "18px",
+              transition: "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease",
+            }}
+            title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+          >
+            {isDarkMode ? "☀️" : "🌙"}
+          </button>
+
           <div style={{ position: "relative" }}>
             <button
               onClick={() => setShowPriceFinder(!showPriceFinder)}
@@ -854,10 +1103,10 @@ Generated At: ${new Date().toLocaleString()}
                 width: 48,
                 height: 48,
                 borderRadius: "50%",
-                background: showPriceFinder ? "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)" : "rgba(255, 255, 255, 0.95)",
+                background: showPriceFinder ? "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)" : "var(--bg-glass)",
                 color: showPriceFinder ? "#ffffff" : "var(--text-primary)",
                 backdropFilter: "blur(12px)",
-                boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1)",
+                boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.2)",
                 border: "1px solid var(--card-border)",
                 display: "flex",
                 alignItems: "center",
@@ -878,11 +1127,11 @@ Generated At: ${new Date().toLocaleString()}
                   top: "58px",
                   right: "0px",
                   width: "340px",
-                  backgroundColor: "rgba(255, 255, 255, 0.98)",
+                  backgroundColor: "var(--bg-card)",
                   backdropFilter: "blur(16px)",
                   borderRadius: "18px",
-                  border: "1px solid var(--card-border, rgba(0,0,0,0.12))",
-                  boxShadow: "0 20px 35px -10px rgba(0,0,0,0.2)",
+                  border: "1px solid var(--card-border)",
+                  boxShadow: "0 20px 35px -10px rgba(0,0,0,0.4)",
                   padding: "16px",
                   display: "flex",
                   flexDirection: "column",
@@ -892,14 +1141,14 @@ Generated At: ${new Date().toLocaleString()}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
-                    <h4 style={{ margin: 0, fontSize: "13px", fontWeight: 700, color: "#0f172a" }}>
+                    <h4 style={{ margin: 0, fontSize: "13px", fontWeight: 700, color: "var(--text-primary)" }}>
                       Online & Nearby Spool Deals
                     </h4>
-                    <span style={{ fontSize: "10px", color: "#64748b" }}>Select a listing to update spool price</span>
+                    <span style={{ fontSize: "10px", color: "var(--text-tertiary)" }}>Select a listing to update spool price</span>
                   </div>
                   <button
                     onClick={() => setShowPriceFinder(false)}
-                    style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px", color: "#94a3b8" }}
+                    style={{ background: "none", border: "none", cursor: "pointer", fontSize: "14px", color: "var(--text-tertiary)" }}
                   >
                     ✕
                   </button>
@@ -917,8 +1166,8 @@ Generated At: ${new Date().toLocaleString()}
                         fontWeight: 600,
                         border: "none",
                         cursor: "pointer",
-                        background: selectedFilterMaterial === mat ? "#2563eb" : "#f1f5f9",
-                        color: selectedFilterMaterial === mat ? "#ffffff" : "#475569",
+                        background: selectedFilterMaterial === mat ? "var(--accent-blue)" : "var(--bg-pill)",
+                        color: selectedFilterMaterial === mat ? "#ffffff" : "var(--text-secondary)",
                       }}
                     >
                       {mat}
@@ -938,13 +1187,13 @@ Generated At: ${new Date().toLocaleString()}
                           alignItems: "center",
                           padding: "8px 10px",
                           borderRadius: "10px",
-                          background: "#f8fafc",
-                          border: "1px solid rgba(0,0,0,0.05)",
+                          background: "var(--bg-secondary)",
+                          border: "1px solid var(--card-border)",
                         }}
                       >
                         <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                          <span style={{ fontSize: "11px", fontWeight: 600, color: "#1e293b" }}>{item.name}</span>
-                          <span style={{ fontSize: "9px", color: "#64748b" }}>{item.store} ({item.distance})</span>
+                          <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-primary)" }}>{item.name}</span>
+                          <span style={{ fontSize: "9px", color: "var(--text-tertiary)" }}>{item.store} ({item.distance})</span>
                         </div>
                         <button
                           onClick={() => {
@@ -957,7 +1206,7 @@ Generated At: ${new Date().toLocaleString()}
                           style={{
                             padding: "5px 10px",
                             borderRadius: "6px",
-                            backgroundColor: "#2563eb",
+                            backgroundColor: "var(--accent-blue)",
                             color: "#ffffff",
                             border: "none",
                             fontSize: "11px",
@@ -979,12 +1228,12 @@ Generated At: ${new Date().toLocaleString()}
           {HEATMAP_MODES.map(({ key, label }) => {
             const isActive = activeHeatmap === key;
             const shortLabel = key === "none" ? "OFF" : key === "overhang" ? "OVH" : key === "stress" ? "STR" : "THN";
-            let bgGradient = "rgba(255, 255, 255, 0.95)";
+            let bgGradient = "var(--bg-glass)";
             let textColor = "var(--text-primary)";
-            let shadowStyle = "0 4px 12px rgba(0, 0, 0, 0.05)";
+            let shadowStyle = "0 4px 12px rgba(0, 0, 0, 0.1)";
             if (isActive) {
               textColor = "#fff";
-              shadowStyle = "0 6px 16px rgba(0, 0, 0, 0.15)";
+              shadowStyle = "0 6px 16px rgba(0, 0, 0, 0.25)";
               if (key === "none") bgGradient = "linear-gradient(135deg, #334155 0%, #0f172a 100%)";
               else if (key === "overhang") bgGradient = "linear-gradient(180deg, #38bdf8 0%, #2563eb 100%)";
               else if (key === "stress") bgGradient = "linear-gradient(180deg, #facc15 0%, #ea580c 100%)";
@@ -1035,9 +1284,9 @@ Generated At: ${new Date().toLocaleString()}
               letterSpacing: "-0.01em",
               cursor: "pointer",
               backdropFilter: "blur(12px)",
-              boxShadow: "0 4px 12px rgba(0, 0, 0, 0.05)",
+              boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
               border: "1px solid var(--card-border)",
-              background: showBedBounds ? "var(--accent-blue)" : "rgba(255, 255, 255, 0.95)",
+              background: showBedBounds ? "var(--accent-blue)" : "var(--bg-glass)",
               color: showBedBounds ? "#fff" : "var(--text-primary)",
               transition: "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease, color 0.2s ease",
             }}
@@ -1057,9 +1306,9 @@ Generated At: ${new Date().toLocaleString()}
               letterSpacing: "-0.01em",
               cursor: "pointer",
               backdropFilter: "blur(12px)",
-              boxShadow: "0 4px 12px rgba(0, 0, 0, 0.05)",
+              boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
               border: "1px solid var(--card-border)",
-              background: showHoles ? "#e11d48" : "rgba(255, 255, 255, 0.95)",
+              background: showHoles ? "#e11d48" : "var(--bg-glass)",
               color: showHoles ? "#fff" : "var(--text-primary)",
               transition: "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease, color 0.2s ease",
             }}
@@ -1077,9 +1326,9 @@ Generated At: ${new Date().toLocaleString()}
               width: 48,
               height: 48,
               borderRadius: "50%",
-              background: "rgba(255, 255, 255, 0.95)",
+              background: "var(--bg-glass)",
               backdropFilter: "blur(12px)",
-              boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1)",
+              boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.2)",
               border: "1px solid var(--card-border)",
               display: "flex",
               alignItems: "center",
@@ -1102,9 +1351,9 @@ Generated At: ${new Date().toLocaleString()}
               width: 48,
               height: 48,
               borderRadius: "50%",
-              background: wireframe ? "var(--accent-blue)" : "rgba(255, 255, 255, 0.95)",
+              background: wireframe ? "var(--accent-blue)" : "var(--bg-glass)",
               backdropFilter: "blur(12px)",
-              boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1)",
+              boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.2)",
               border: "1px solid var(--card-border)",
               display: "flex",
               alignItems: "center",
@@ -1127,9 +1376,9 @@ Generated At: ${new Date().toLocaleString()}
               width: 48,
               height: 48,
               borderRadius: "50%",
-              background: useInches ? "var(--accent-blue)" : "rgba(255, 255, 255, 0.95)",
+              background: useInches ? "var(--accent-blue)" : "var(--bg-glass)",
               backdropFilter: "blur(12px)",
-              boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1)",
+              boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.2)",
               border: "1px solid var(--card-border)",
               display: "flex",
               alignItems: "center",
@@ -1146,7 +1395,7 @@ Generated At: ${new Date().toLocaleString()}
           </button>
         </div>
       </div>
-  
+
       <div className="sidebar-container" style={{ position: "absolute", top: 88, left: 20, zIndex: 10, display: "flex", flexDirection: "column", gap: 12 }}>
         <div className="apple-card">
           <div className="card-title">
@@ -1155,7 +1404,7 @@ Generated At: ${new Date().toLocaleString()}
           {analysis ? (
             <>
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4, background: "rgba(0,0,0,0.02)", padding: "10px 6px", borderRadius: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 4, background: "var(--bg-secondary)", padding: "10px 6px", borderRadius: 12, border: "1px solid var(--card-border)" }}>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}><span style={{ fontSize: "10px", color: "var(--text-tertiary)", fontWeight: 700 }}>X</span><span style={{ fontWeight: 600, fontSize: "13px" }}>{formatDim(analysis.x)}</span></div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", borderLeft: "1px solid var(--divider)", borderRight: "1px solid var(--divider)" }}><span style={{ fontSize: "10px", color: "var(--text-tertiary)", fontWeight: 700 }}>Y</span><span style={{ fontWeight: 600, fontSize: "13px" }}>{formatDim(analysis.y)}</span></div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}><span style={{ fontSize: "10px", color: "var(--text-tertiary)", fontWeight: 700 }}>Z</span><span style={{ fontWeight: 600, fontSize: "13px" }}>{formatDim(analysis.z)}</span></div>
